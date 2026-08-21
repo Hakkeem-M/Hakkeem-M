@@ -1,16 +1,28 @@
-## Hi there 👋
+# ABC Cargo IT — Development & Systems Administration
 
-<!--
-**ABCCARGO/ABCCARGO** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
+Professional profile focused on secure automation, resilient infrastructure, business systems and practical software development.
 
-Here are some ideas to get you started:
+## Areas of focus
 
-- 🔭 I’m currently working on ...
-- 🌱 I’m currently learning ...
-- 👯 I’m looking to collaborate on ...
-- 🤔 I’m looking for help with ...
-- 💬 Ask me about ...
-- 📫 How to reach me: ...
-- 😄 Pronouns: ...
-- ⚡ Fun fact: ...
--->
+- PowerShell and Windows administration
+- Microsoft 365 and identity operations
+- Network, endpoint and server troubleshooting
+- Secure API integrations and internal business applications
+- Git, CI/CD, monitoring and technical documentation
+- IT governance, service resilience and operational improvement
+
+## Engineering principles
+
+- Security by design and least privilege
+- Automate repeatable work
+- Test changes and maintain a clear rollback
+- Document decisions, dependencies and expected results
+- Protect business continuity and confidential information
+
+## Public repository standard
+
+Public repositories contain sanitized examples and reusable technical work only. Credentials, private infrastructure details, customer information, employee data and financial records are never published.
+
+## Organization
+
+Professional and business projects are managed through [@abccargoIT](https://github.com/abccargoIT).
