@@ -24,6 +24,7 @@
       * Rollback: Remove-Phase1SafePolicies.ps1 deletes everything with the name prefix.
 
 .EXAMPLE
+    # Run Get-IntuneBaselineInventory.ps1 FIRST and drop any item already configured via -Only.
     .\Deploy-Phase1SafePolicies.ps1 -Mode Validate -TenantId <tenant-guid>
     .\Deploy-Phase1SafePolicies.ps1 -Mode Create   -TenantId <tenant-guid>
     .\Deploy-Phase1SafePolicies.ps1 -Mode Create   -TenantId <tenant-guid> -PilotGroupId <group-guid>
@@ -40,7 +41,10 @@ param(
 
     [string]$Prefix = 'P1-Safe',
 
-    [switch]$SkipOneDriveKfm
+    # Phase 1 items to deploy. Remove any item the inventory script marks AlreadyConfigured = YES.
+    # N13 (update ring) and N23 (compliance) are NOT in the default because the tenant already has them.
+    [ValidateSet('IN01', 'IN05', 'N06', 'N07', 'IN09', 'N04', 'N13', 'N23')]
+    [string[]]$Only = @('IN01', 'IN05', 'N06', 'N07', 'IN09', 'N04')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -151,7 +155,7 @@ $catalogPolicies = [ordered]@{
         New-Choice 'device_vendor_msft_laps_policies_backupdirectory' 'device_vendor_msft_laps_policies_backupdirectory_1' # 1 = Entra ID
     )
 }
-if (-not $SkipOneDriveKfm) {
+if ($Only -contains 'N04') {
     $catalogPolicies['N04 OneDrive Known Folder Move'] = @(
         New-Choice "${od}_silentaccountconfig" "${od}_silentaccountconfig_1"
         New-Choice "${od}_kfmsilentoptin" "${od}_kfmsilentoptin_1" @(
@@ -210,6 +214,10 @@ $compliance = @{
         })
 }
 #endregion
+
+# Keep only the selected items
+foreach ($k in @($catalogPolicies.Keys)) { if ($Only -notcontains $k.Split(' ')[0]) { $catalogPolicies.Remove($k) } }
+Write-Host "Selected items: $($Only -join ', ')" -ForegroundColor Cyan
 
 #region --- Validation (read-only) --------------------------------------------
 function Get-AllInstances {
@@ -307,10 +315,10 @@ foreach ($short in $catalogPolicies.Keys) {
 $existingConfig = Get-ExistingNames "$Beta/deviceManagement/deviceConfigurations?`$select=id,displayName" 'displayName'
 $existingComp   = Get-ExistingNames "$Beta/deviceManagement/deviceCompliancePolicies?`$select=id,displayName" 'displayName'
 
-foreach ($item in @(
-        @{ Body = $updateRing; Path = 'deviceConfigurations'; Existing = $existingConfig }
-        @{ Body = $compliance; Path = 'deviceCompliancePolicies'; Existing = $existingComp }
-    )) {
+$legacyItems = @()
+if ($Only -contains 'N13') { $legacyItems += @{ Body = $updateRing; Path = 'deviceConfigurations'; Existing = $existingConfig } }
+if ($Only -contains 'N23') { $legacyItems += @{ Body = $compliance; Path = 'deviceCompliancePolicies'; Existing = $existingComp } }
+foreach ($item in $legacyItems) {
     $name = $item.Body.displayName
     try {
         if ($item.Existing.ContainsKey($name)) {

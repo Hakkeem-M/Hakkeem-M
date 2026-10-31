@@ -9,12 +9,17 @@ These are the lowest-risk items from the 27-policy checklist. Phase 1 blocks not
 | N06 | Windows Firewall on (domain, private, public) | Enforced | Script |
 | N07 | Attack surface reduction rules (15 rules) | **Audit only** | Script |
 | IN09 | Windows LAPS, password stored in Entra ID | Enforced | Script |
-| N04 | OneDrive Known Folder Move (silent) | Enforced | Script (`-SkipOneDriveKfm` leaves it out) |
-| N13 | Windows Update ring (3d/30d deferral, 7d deadline) | Enforced | Script |
-| N23 | Windows compliance policy | **Report only** (no Conditional Access) | Script |
+| N04 | OneDrive Known Folder Move (silent) | Enforced | Script |
+| N13 | Windows Update ring (3d/30d deferral, 7d deadline) | Enforced | Script, **opt-in only** (tenant already has rings) |
+| N23 | Windows compliance policy | **Report only** (no Conditional Access) | Script, **opt-in only** (tenant already has compliance) |
 | N17 | Edge SmartScreen | Enforced | Manual, step 6 |
 
 **Left for later phases:** USB block, local admins / EPM, App Control, Credential Guard, expedite updates, feature-update pin, Conditional Access enforcement, Apple/Android, Wi-Fi certificates, Defender for Endpoint onboarding (check licences first).
+
+## Current tenant state (from dashboard, 31 Oct 2026)
+
+116 Windows devices · 52 on update rings · 49 non-compliant · 7 profiles with error/conflict · 2 update-ring conflicts.
+**Clear the 7 profile conflicts and review the 49 non-compliant devices first.** New policies on top of conflicts make them worse.
 
 ## Before you run it
 
@@ -31,6 +36,12 @@ These are the lowest-risk items from the 27-policy checklist. Phase 1 blocks not
 ```powershell
 cd .\intune\phase1-safe
 
+# 0. Inventory: READ-ONLY. Lists existing policies and which Phase 1 areas are already set.
+#    For every area marked YES, leave it out of -Only below (fix or merge the existing policy instead).
+.\Get-IntuneBaselineInventory.ps1 -TenantId <tenant-id>
+
+# Default -Only = IN01, IN05, N06, N07, IN09, N04. Example if BitLocker and Firewall already exist:
+#   -Only IN05,N07,IN09,N04
 # 1. Validate: read-only, creates nothing. Checks every setting ID and value against your tenant.
 .\Deploy-Phase1SafePolicies.ps1 -Mode Validate -TenantId <tenant-id>
 
