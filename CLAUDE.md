@@ -66,6 +66,7 @@ These are the standing instructions for Claude in this repository.
 - **Target repo:** `Hakkeem-M/CrownLanka-Auto-Garage-Project` (not attached yet, access denied).
 - **Prototype v1 (2026-11-05):** a single-file HTML app, published as private artifact https://claude.ai/artifact/Dvg4MXCEbo4ivnizREuyNS. Sources were built in a session scratchpad (`garage-erp/src/*`, assembled into `index.html`). Push them to the target repo once access works.
 - **Modules:** dashboard, job cards (services, parts, inspection, photos, voice notes), task board, technician/bay schedule, bookings, vehicle history, POS, invoices + VAT, CRM, WhatsApp/SMS/email messaging, inventory, purchase orders, reports, P&L and chart of accounts, attendance and payroll, customer app, role-based access.
-- **Verified:** headless Chromium click-through of all 17 screens with no errors, no horizontal overflow at 390 px, light and dark themes.
+- **v2 (2026-11-05):** lighter background with moving colour blobs; frosted-glass sidebar, top bar and phone tab bar; Machines module (gate camera plate reads, diagnostic scanner, aligner, battery tester, AC station, dyno, balancer, lift sensors; readings attach to job cards; calibration alerts on dashboard).
+- **Verified:** headless Chromium click-through of all 18 screens with no errors, no horizontal overflow at 390 px, light and dark themes.
 - **Limits:** sample data, stored only in the browser's localStorage. No backend, no logins, no messaging or payment gateways.
 - **Next:** pick the production stack (backend + DB + auth) and port modules.
