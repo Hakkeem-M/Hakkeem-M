@@ -58,5 +58,14 @@ These are the standing instructions for Claude in this repository.
 - **Repo:** `hakkeem-m/hakkeem-m` — GitHub profile README (personal scope; keep separate from ABC Cargo/lab work).
 - **Files:** `README.md` (privacy-safe professional profile), `CLAUDE.md` (this file).
 - **Last update:** 2026-11-05 — added CLAUDE.md working rules.
-- **Open issues:** none.
-- **Next action:** await next request.
+- **Open issues:** GitHub push returns 403 (Claude app has no access to `Hakkeem-M/*`).
+- **Next action:** once access is fixed, push this branch and open a draft PR.
+
+## Crown Lanka Garage ERP (separate project)
+
+- **Target repo:** `Hakkeem-M/CrownLanka-Auto-Garage-Project` (not attached yet, access denied).
+- **Prototype v1 (2026-11-05):** a single-file HTML app, published as private artifact https://claude.ai/artifact/Dvg4MXCEbo4ivnizREuyNS. Sources were built in a session scratchpad (`garage-erp/src/*`, assembled into `index.html`). Push them to the target repo once access works.
+- **Modules:** dashboard, job cards (services, parts, inspection, photos, voice notes), task board, technician/bay schedule, bookings, vehicle history, POS, invoices + VAT, CRM, WhatsApp/SMS/email messaging, inventory, purchase orders, reports, P&L and chart of accounts, attendance and payroll, customer app, role-based access.
+- **Verified:** headless Chromium click-through of all 17 screens with no errors, no horizontal overflow at 390 px, light and dark themes.
+- **Limits:** sample data, stored only in the browser's localStorage. No backend, no logins, no messaging or payment gateways.
+- **Next:** pick the production stack (backend + DB + auth) and port modules.
