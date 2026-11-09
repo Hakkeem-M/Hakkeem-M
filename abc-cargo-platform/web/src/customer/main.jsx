@@ -5,9 +5,9 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter, Routes, Route, NavLink, Link, useNavigate, useParams } from 'react-router-dom';
 import '../shared/styles.css';
 import { createApi } from '../shared/api.js';
-import { SessionProvider, useSession, LoginForm } from '../shared/session.jsx';
+import { SessionProvider, useSession, LoginForm, demoAccount, RegionPicker } from '../shared/session.jsx';
 import { ToastProvider, useLoad, useAction, Spinner, ErrorBox, Badge, Field, Empty, Modal, useForm } from '../shared/ui.jsx';
-import { aed, dt, dOnly, SERVICES, STATUS } from '../shared/format.js';
+import { aed, money, dt, dOnly, SERVICES, STATUS, REGIONS } from '../shared/format.js';
 import { registerSW } from '../shared/devices.jsx';
 import { ShippingLabel, InvoiceDoc, CommercialInvoice } from '../shared/docs.jsx';
 import ShipmentForm from '../shared/ShipmentForm.jsx';
@@ -94,15 +94,18 @@ function Track() {
 }
 
 function Quote() {
-  const [v, , bind] = useForm({ dest_country: 'IN', dest_city: '', weight: 2, length: '', width: '', height: '', customs_value: 0, incoterm: 'DAP', product: 'PARCEL' });
-  const meta = useLoad(() => api.get('/api/public/meta'), []);
+  const { region: sessionRegion } = useSession();
+  const [region, setRegion] = useState(sessionRegion || 'AE');
+  const [v, setV, bind] = useForm({ dest_country: region === 'IN' ? 'AE' : 'IN', dest_city: '', weight: 2, length: '', width: '', height: '', customs_value: 0, incoterm: 'DAP', product: 'PARCEL' });
+  const meta = useLoad(() => api.get(`/api/public/meta?entity=${region}`), [region]);
   const [q, setQ] = useState(null);
   const [err, setErr] = useState(null);
   const go = async (e) => {
     e.preventDefault(); setErr(null);
     try {
-      const r = await api.post('/api/public/quote', { origin_city: 'Dubai', dest_city: v.dest_city || (v.dest_country === 'AE' ? 'Dubai' : 'City'), dest_country: v.dest_country, weight: v.weight,
-        length: v.length || undefined, width: v.width || undefined, height: v.height || undefined, customs_value: Number(v.customs_value) || 0, incoterm: v.dest_country === 'AE' ? undefined : v.incoterm, product: v.product });
+      const r = await api.post('/api/public/quote', { entity: region, origin_city: meta.data?.cities[0] || 'City', dest_city: v.dest_city || (v.dest_country === region ? meta.data?.cities[1] || 'City' : 'City'),
+        dest_country: v.dest_country, weight: v.weight, length: v.length || undefined, width: v.width || undefined, height: v.height || undefined,
+        customs_value: Number(v.customs_value) || 0, incoterm: v.dest_country === region ? undefined : v.incoterm, product: v.product });
       setQ(r.quotes);
     } catch (x) { setErr(x); }
   };
@@ -111,23 +114,24 @@ function Quote() {
       <Top title="Rates — ship worldwide" />
       <form className="m-body" onSubmit={go}>
         <div className="card stack">
-          <Field label="Destination country"><select {...bind('dest_country')}>{meta.data?.country_list?.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}<option value="AE">United Arab Emirates (domestic)</option></select></Field>
-          {v.dest_country === 'AE' && <Field label="Emirate"><select {...bind('dest_city')}>{meta.data?.cities.map((c) => <option key={c}>{c}</option>)}</select></Field>}
+          <Field label="Sending from"><RegionPicker value={region} onChange={(r) => { setRegion(r); setV((s) => ({ ...s, dest_country: r === 'IN' ? 'AE' : 'IN' })); setQ(null); }} /></Field>
+          <Field label="Destination country"><select {...bind('dest_country')}>{meta.data?.country_list?.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}<option value={region}>{REGIONS[region]?.name} (domestic)</option></select></Field>
+          {v.dest_country === region && <Field label="City"><select {...bind('dest_city')}>{meta.data?.cities.map((c) => <option key={c}>{c}</option>)}</select></Field>}
           <div className="grid g2">
             <Field label="Weight (kg)"><input {...bind('weight', 'number')} /></Field>
-            {v.dest_country !== 'AE' && <Field label="Contents"><select {...bind('product')}><option value="PARCEL">Parcel</option><option value="DOCUMENT">Documents</option><option value="CARGO">Air cargo</option></select></Field>}
+            {v.dest_country !== region && <Field label="Contents"><select {...bind('product')}><option value="PARCEL">Parcel</option><option value="DOCUMENT">Documents</option><option value="CARGO">Air cargo</option></select></Field>}
           </div>
           <Field label="Box size cm (optional)"><div className="row nowrap" style={{ gap: 4 }}><input {...bind('length', 'number')} placeholder="L" /><input {...bind('width', 'number')} placeholder="W" /><input {...bind('height', 'number')} placeholder="H" /></div></Field>
-          {v.dest_country !== 'AE' && v.product !== 'DOCUMENT' && <div className="grid g2"><Field label="Goods value (AED)"><input {...bind('customs_value', 'number')} /></Field>
+          {v.dest_country !== region && v.product !== 'DOCUMENT' && <div className="grid g2"><Field label={`Goods value (${REGIONS[region]?.currency})`}><input {...bind('customs_value', 'number')} /></Field>
             <Field label="Duties"><select {...bind('incoterm')}><option value="DAP">Receiver pays</option><option value="DDP">I pay (DDP)</option></select></Field></div>}
           <button className="btn primary lg">Get prices</button>
         </div>
         <ErrorBox error={err} />
         {q && (q.length ? q.map((x) => (
-          <div key={x.service} className="card row nowrap"><div className="spacer"><b>{SERVICES[x.service]}</b><div className="small muted">{x.transit} · {x.chargeable_weight} kg chargeable</div>
-            {x.duties_estimate > 0 && <div className="tiny">incl. duties & taxes {aed(x.duties_estimate)}</div>}
-            {x.duties_guide?.applies && v.incoterm === 'DAP' && <div className="tiny muted">Receiver pays est. {aed(x.duties_guide.total)} duties/taxes</div>}</div>
-            <div className="big-number" style={{ fontSize: '1.2rem' }}>{aed(x.total_charge)}</div></div>
+          <div key={x.service} className="card row nowrap"><div className="spacer"><b>{SERVICES[x.service]}</b><div className="small muted">{x.mode === 'SEA' ? '🚢 ' : '✈️ '}{x.transit} · {x.unit === 'CBM' ? `${x.chargeable_units} CBM` : `${x.chargeable_weight} kg`} chargeable</div>
+            {x.duties_estimate > 0 && <div className="tiny">incl. duties & taxes {money(x.duties_estimate, x.currency)}</div>}
+            {x.duties_guide?.applies && v.incoterm === 'DAP' && <div className="tiny muted">Receiver pays est. {money(x.duties_guide.total, x.currency)} duties/taxes</div>}</div>
+            <div className="big-number" style={{ fontSize: '1.2rem' }}>{money(x.total_charge, x.currency)}</div></div>
         )) : <Empty>No service to this destination yet.</Empty>)}
         <Link to="/ship" className="btn accent lg block">Book a pickup</Link>
       </form>
@@ -187,8 +191,8 @@ function Ship() {
     <>
       <Top title="Book a shipment" />
       <div className="m-body">
-        <ShipmentForm api={api} mobile busy={busy}
-          initial={{ shipper_name: c.name, shipper_phone: c.phone || user.phone || '', shipper_address: c.address || '', origin_city: c.city || 'Dubai' }}
+        <ShipmentForm api={api} mobile busy={busy} region={c.entity_code} receiversUrl="/api/customer/receivers"
+          initial={{ shipper_name: c.name, shipper_phone: c.phone || user.phone || '', shipper_address: c.address || '', origin_city: c.city || undefined }}
           submitLabel="Book & schedule pickup"
           extra={() => cash && (
             <div className="card flat stack"><b>Payment</b>
@@ -217,7 +221,7 @@ function Shipments() {
           <Link key={s.id} to={`/shipments/${s.awb}`} className="card" style={{ color: 'inherit' }}>
             <div className="row between"><b className="mono small">{s.awb}</b><Badge s={s.status} /></div>
             <div className="small">{s.dest_country !== 'AE' ? `✈️ ${s.dest_city}, ${s.dest_country}` : `${s.origin_city} → ${s.dest_city}`} · {s.consignee_name}</div>
-            <div className="tiny muted">{SERVICES[s.service]} · {aed(s.total_charge)} · {dt(s.created_at)}{s.reference && ` · ${s.reference}`}</div>
+            <div className="tiny muted">{SERVICES[s.service]} · {money(s.total_charge, s.currency)} · {dt(s.created_at)}{s.reference && ` · ${s.reference}`}</div>
           </Link>
         )) : <Empty>No shipments yet. <Link to="/ship">Book your first</Link>.</Empty>}
       </div>
@@ -241,7 +245,7 @@ function ShipmentView() {
         <TrackResult t={{ ...s, status_label: STATUS[s.status]?.label, dest_country_name: s.dest_country, events: s.events.slice().reverse(), flight_no: s.manifest?.flight_no, flight_date: s.manifest?.flight_date }} />
         <div className="card small">
           <div><b>To:</b> {s.consignee_name}, {s.consignee_address}, {s.dest_city} {s.consignee_postcode} {s.dest_country}</div>
-          <div><b>Charges:</b> {aed(s.total_charge)} ({s.payment_mode}){s.duties_estimate ? ` incl. DDP duties ${aed(s.duties_estimate)}` : ''}{s.shipment_type === 'INTERNATIONAL' && ` · customs: ${STATUS[s.customs_status]?.label}`}</div>
+          <div><b>Charges:</b> {money(s.total_charge, s.currency)} ({s.payment_mode}){s.duties_estimate ? ` incl. DDP duties ${money(s.duties_estimate, s.currency)}` : ''}{s.box_count > 1 ? ` · ${s.box_count} boxes` : ''}{s.mode === 'SEA' ? ` · ${s.cbm} CBM` : ''}{s.shipment_type === 'INTERNATIONAL' && ` · customs: ${STATUS[s.customs_status]?.label}`}</div>
           {s.customs_status === 'PENDING' && <div className="alert warn small" style={{ marginTop: 6 }}>Customs documents incomplete (HS codes / item values). Our team will contact you, or raise a ticket.</div>}
         </div>
         <div className="grid g2" style={{ gridTemplateColumns: '1fr 1fr' }}>
@@ -266,7 +270,7 @@ function Invoices() {
         {list.loading ? <Spinner /> : list.data?.length ? list.data.map((i) => (
           <Link key={i.id} to={`/invoices/${i.id}`} className="card row between" style={{ color: 'inherit' }}>
             <div><b className="mono small">{i.number}</b><div className="tiny muted">{dOnly(i.issue_date)} · due {dOnly(i.due_date)}</div></div>
-            <div className="right"><Badge s={i.status} /><div className="small">{aed(i.balance > 0 ? i.balance : i.total)}</div></div>
+            <div className="right"><Badge s={i.status} /><div className="small">{money(i.balance > 0 ? i.balance : i.total, i.currency)}</div></div>
           </Link>
         )) : <Empty>No invoices.</Empty>}
       </div>
@@ -288,7 +292,7 @@ function InvoiceView() {
       <Top title={inv.number} back />
       <div className="m-body">
         {['UNPAID', 'PARTIAL'].includes(inv.status) && prof.data?.payments_demo && (
-          <button className="btn accent lg block" disabled={busy} onClick={() => run(() => api.post(`/api/customer/invoices/${inv.id}/pay`), 'Payment successful').then(d.reload)}>💳 Pay {aed(inv.balance)} online (demo gateway)</button>
+          <button className="btn accent lg block" disabled={busy} onClick={() => run(() => api.post(`/api/customer/invoices/${inv.id}/pay`), 'Payment successful').then(d.reload)}>💳 Pay {money(inv.balance, inv.currency)} online (demo gateway)</button>
         )}
         <div style={{ overflowX: 'auto' }}><InvoiceDoc inv={inv} company={meta.data?.company} /></div>
         <button className="btn block" onClick={() => window.print()}>🖨️ Print / save PDF</button>
@@ -376,18 +380,19 @@ function Account() {
 function Register() {
   const { adopt } = useSession();
   const nav = useNavigate();
-  const [v, , bind] = useForm({ name: '', company: '', email: '', phone: '', city: 'Dubai', address: '', password: '' });
+  const [v, setV, bind] = useForm({ name: '', company: '', email: '', phone: '', city: '', address: '', password: '', region: 'AE' });
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr(null);
-    try { const r = await api.post('/api/auth/register', { ...v, company: v.company || undefined, address: v.address || undefined }); await adopt(r.token); nav('/ship'); } catch (x) { setErr(x); } finally { setBusy(false); }
+    try { const r = await api.post('/api/auth/register', { ...v, company: v.company || undefined, address: v.address || undefined, city: v.city || undefined }); await adopt(r.token); nav('/ship'); } catch (x) { setErr(x); } finally { setBusy(false); }
   };
   return (
     <>
       <Top title="Create account" back />
       <form className="m-body" onSubmit={submit}>
         <ErrorBox error={err} />
+        <Field label="Your country"><RegionPicker value={v.region} onChange={(r) => setV((x) => ({ ...x, region: r }))} /></Field>
         <Field label="Full name"><input {...bind('name')} required autoComplete="name" /></Field>
         <Field label="Company (optional)"><input {...bind('company')} autoComplete="organization" /></Field>
         <Field label="Email"><input {...bind('email')} type="email" required autoComplete="email" /></Field>
@@ -409,7 +414,7 @@ function LoginPage() {
   const { user } = useSession();
   const nav = useNavigate();
   if (user) { setTimeout(() => nav('/'), 0); return null; }
-  return <LoginForm title="ABC Cargo" subtitle="Ship worldwide · Track · Pay" demo="customer@abccargo.demo" accent="customer"
+  return <LoginForm title="ABC Cargo" subtitle="UAE · UK · KSA · India — ship worldwide, track, pay" demo={(r) => demoAccount('customer', r)} accent="customer"
     footer={<div className="small center">New here? <Link to="/register">Create an account</Link> · <Link to="/track">Track without login</Link></div>} />;
 }
 

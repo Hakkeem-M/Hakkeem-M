@@ -5,6 +5,8 @@ import { api } from '../ctx.js';
 import { useLoad, useAction, Spinner, ErrorBox, Badge, Modal, Field, Empty, useForm, Stat } from '../../shared/ui.jsx';
 import { aed, dt, ago, dOnly, telLink, waLink, UAE_CITIES } from '../../shared/format.js';
 import { useSession } from '../../shared/session.jsx';
+import { KycCard } from './Shipments.jsx';
+import { money, REGIONS } from '../../shared/format.js';
 
 const STAGES = ['NEW', 'CONTACTED', 'QUALIFIED', 'PROPOSAL', 'NEGOTIATION', 'LOST'];
 const ACT_IC = { CALL: '📞', MEETING: '🤝', EMAIL: '✉️', WHATSAPP: '💬', NOTE: '📝', TASK: '✅' };
@@ -269,7 +271,7 @@ export function Customer360() {
   const { customer: c, kpi } = d.data;
   return (
     <>
-      <div className="page-head"><div><Link to="/customers" className="small">‹ Customers</Link><h1>{c.name} <Badge tone={c.type === 'ACCOUNT' ? 'info' : 'muted'}>{c.type}</Badge></h1>
+      <div className="page-head"><div><Link to="/customers" className="small">‹ Customers</Link><h1>{c.name} <Badge tone={c.type === 'ACCOUNT' ? 'info' : 'muted'}>{c.type}</Badge> <span className="badge">{REGIONS[c.entity_code]?.flag} {c.entity_code}</span></h1>
         <div className="muted small">{c.code} · {c.industry || '—'} · {c.city} · TRN {c.trn || '—'} · account manager {c.account_manager || '—'}</div></div>
         <div className="row">{c.phone && <a className="btn" href={telLink(c.phone)}>📞 Call</a>}{c.phone && <a className="btn" href={waLink(c.phone)} target="_blank" rel="noreferrer">💬 WhatsApp</a>}</div></div>
       <div className="grid g4">
@@ -287,7 +289,11 @@ export function Customer360() {
           <div className="card"><h3>Invoices</h3><table><tbody>{d.data.invoices.map((i) => <tr key={i.id}><td><Link to={`/invoices/${i.id}`} className="mono">{i.number}</Link></td><td><Badge s={i.status} /></td><td className="num">{aed(i.total)}</td><td className="small">due {dOnly(i.due_date)}</td></tr>)}</tbody></table></div>
           <div className="card"><h3>Tickets</h3><table><tbody>{d.data.tickets.map((t) => <tr key={t.id}><td><Link to={`/tickets/${t.id}`}>{t.number}</Link></td><td>{t.subject}</td><td><Badge s={t.status} /></td></tr>)}</tbody></table>{!d.data.tickets.length && <Empty>No tickets.</Empty>}</div>
         </div>
-        <ActivityLog entity="CUSTOMER" entityId={c.id} items={d.data.activities} onChange={() => d.reload(true)} />
+        <div className="stack">
+          <ActivityLog entity="CUSTOMER" entityId={c.id} items={d.data.activities} onChange={() => d.reload(true)} />
+          <Receivers cid={c.id} />
+          <KycCard ownerType="CUSTOMER" ownerId={c.id} />
+        </div>
       </div>
       {contact && <ContactModal cid={c.id} onClose={() => setContact(false)} onDone={() => { setContact(false); d.reload(true); }} />}
     </>
@@ -305,5 +311,16 @@ function ContactModal({ cid, onClose, onDone }) {
       </div>
       <label className="row small" style={{ marginTop: 8 }}><input type="checkbox" checked={v.is_primary} onChange={(e) => setV({ ...v, is_primary: e.target.checked })} /> Primary contact</label>
     </Modal>
+  );
+}
+
+function Receivers({ cid }) {
+  const list = useLoad(() => api.get(`/api/quotations/customers/${cid}/receivers`), [cid]);
+  return (
+    <div className="card"><h3>📒 Saved receivers</h3>
+      {list.data?.length ? <table><tbody>{list.data.map((r) => <tr key={r.id}><td><b>{r.name}</b>{r.relation ? <span className="tiny muted"> · {r.relation}</span> : null}<div className="tiny muted">{r.phone}</div></td>
+        <td className="small">{r.address}, {r.city} {r.postcode} · {r.country}</td><td className="num tiny">{r.use_count}×</td></tr>)}</tbody></table>
+        : <Empty>No saved receivers — they are added automatically on booking.</Empty>}
+    </div>
   );
 }

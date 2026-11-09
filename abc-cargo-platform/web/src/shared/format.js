@@ -23,20 +23,38 @@ export const STATUS = {
   PROPOSAL: { label: 'Proposal', tone: 'accent' }, NEGOTIATION: { label: 'Negotiation', tone: 'warn' }, WON: { label: 'Won', tone: 'ok' }, LOST: { label: 'Lost', tone: 'muted' },
   NOT_REQUIRED: { label: 'n/a', tone: 'muted' }, DOCS_OK: { label: 'Docs OK', tone: 'ok' }, SUBMITTED: { label: 'Declared', tone: 'info' },
   HOLD: { label: 'Hold', tone: 'bad' }, CLEARED: { label: 'Cleared', tone: 'ok' }, DEPARTED_M: { label: 'Departed', tone: 'info' },
+  DRAFT: { label: 'Draft', tone: 'muted' }, SENT: { label: 'Sent', tone: 'info' }, ACCEPTED: { label: 'Accepted', tone: 'ok' },
+  REJECTED: { label: 'Rejected', tone: 'bad' }, EXPIRED: { label: 'Expired', tone: 'muted' }, CONVERTED: { label: 'Booked', tone: 'ok' },
   OK: { label: 'OK', tone: 'ok' }, WARNING: { label: 'Warning', tone: 'warn' }, EXCEPTION: { label: 'Exception', tone: 'bad' },
   URGENT: { label: 'Urgent', tone: 'bad' }, HIGH: { label: 'High', tone: 'warn' }, MEDIUM: { label: 'Medium', tone: 'info' }, LOW: { label: 'Low', tone: 'muted' },
 };
 
 export const SERVICES = {
-  INTL_EXPRESS: 'Intl Express (Air Courier)', INTL_ECONOMY: 'Intl Economy', AIR_CARGO: 'Air Freight Cargo',
+  INTL_EXPRESS: 'Intl Express (Air Courier)', INTL_ECONOMY: 'Intl Economy', AIR_CARGO: 'Air Freight Cargo', SEA_CARGO: 'Sea Cargo (per CBM)',
   SAME_DAY: 'Same Day (UAE)', EXPRESS: 'Domestic Express', STANDARD: 'Domestic Standard',
 };
-export const INTL_SERVICES = ['INTL_EXPRESS', 'INTL_ECONOMY', 'AIR_CARGO'];
-export const isIntl = (s) => s && s.dest_country && s.dest_country !== 'AE';
+export const INTL_SERVICES = ['INTL_EXPRESS', 'INTL_ECONOMY', 'AIR_CARGO', 'SEA_CARGO'];
+export const isIntl = (s) => s && s.shipment_type ? s.shipment_type === 'INTERNATIONAL' : s && s.dest_country && s.dest_country !== (s.entity_code || 'AE');
 export const UAE_CITIES = ['Dubai', 'Abu Dhabi', 'Al Ain', 'Sharjah', 'Ajman', 'Umm Al Quwain', 'Ras Al Khaimah', 'Fujairah'];
 
-const nf = new Intl.NumberFormat('en-AE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-export const aed = (n) => `AED ${nf.format(Number(n) || 0)}`;
+// Multi-currency money formatting. The active region's currency is the default; pass a record's own currency when known.
+export const REGIONS = {
+  AE: { name: 'UAE', flag: '🇦🇪', currency: 'AED', locale: 'en-AE' },
+  GB: { name: 'United Kingdom', flag: '🇬🇧', currency: 'GBP', locale: 'en-GB' },
+  SA: { name: 'Saudi Arabia', flag: '🇸🇦', currency: 'SAR', locale: 'en-SA' },
+  IN: { name: 'India', flag: '🇮🇳', currency: 'INR', locale: 'en-IN' },
+};
+let defaultCurrency = 'AED';
+export const setCurrency = (c) => { if (c) defaultCurrency = c; };
+export const getCurrency = () => defaultCurrency;
+const fmts = {};
+export const money = (n, currency) => {
+  const cur = currency || defaultCurrency;
+  const f = fmts[cur] || (fmts[cur] = new Intl.NumberFormat('en-GB', { style: 'currency', currency: cur, currencyDisplay: 'code', minimumFractionDigits: cur === 'INR' ? 0 : 2, maximumFractionDigits: 2 }));
+  return f.format(Number(n) || 0).replace(/\u00a0/g, ' ');
+};
+/** Back-compat name used across the UI: formats in the given or active currency. */
+export const aed = money;
 export const num = (n) => new Intl.NumberFormat('en-AE').format(Number(n) || 0);
 
 // Server stores UTC "YYYY-MM-DD HH:MM:SS" or ISO strings.

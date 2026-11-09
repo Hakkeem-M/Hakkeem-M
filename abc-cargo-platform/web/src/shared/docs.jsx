@@ -1,6 +1,6 @@
 // Printable documents: AWB shipping label and VAT tax invoice / receipt.
 import { Barcode } from './devices.jsx';
-import { aed, dOnly, dt, SERVICES } from './format.js';
+import { money, dOnly, dt, SERVICES } from './format.js';
 
 export function ShippingLabel({ s, company }) {
   return (
@@ -21,9 +21,9 @@ export function ShippingLabel({ s, company }) {
         <div><div style={{ fontSize: 10, fontWeight: 700 }}>TO</div><b>{s.consignee_name}</b><br />{s.consignee_address}<br /><b style={{ fontSize: 16 }}>{s.dest_city}</b> {s.dest_country !== 'AE' && s.dest_country}<br />{s.consignee_phone}</div>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px solid #000', marginTop: 6, paddingTop: 6 }}>
-        <span>Pcs: <b>{s.pieces}</b></span><span>Wt: <b>{s.chargeable_weight} kg</b></span><span>{dOnly(s.created_at)}</span>
+        <span>Pcs: <b>{s.box_count || s.pieces}</b></span><span>{s.mode === 'SEA' ? <>CBM: <b>{s.cbm}</b></> : <>Wt: <b>{s.chargeable_weight} kg</b></>}</span><span>{dOnly(s.created_at)}</span>
       </div>
-      {s.cod_amount > 0 && <div style={{ marginTop: 6, border: '2px solid #000', textAlign: 'center', fontWeight: 800, fontSize: 18 }}>COD {aed(s.cod_amount)}</div>}
+      {s.cod_amount > 0 && <div style={{ marginTop: 6, border: '2px solid #000', textAlign: 'center', fontWeight: 800, fontSize: 18 }}>COD {money(s.cod_amount, s.currency)}</div>}
       {s.reference && <div style={{ marginTop: 4 }}>Ref: {s.reference}</div>}
     </div>
   );
@@ -37,7 +37,7 @@ export function InvoiceDoc({ inv, company, receipt }) {
         <div>
           <div style={{ fontSize: 20, fontWeight: 800, color: '#0b3d91' }}>{company?.name || 'ABC Cargo & Courier'}</div>
           <div>{company?.address}</div><div>{company?.phone} · {company?.email}</div>
-          <div>TRN: <b>{company?.trn}</b></div>
+          <div>{company?.tax_label || 'TRN'}: <b>{company?.trn}</b></div>
         </div>
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontSize: 18, fontWeight: 800 }}>{title}</div>
@@ -51,7 +51,7 @@ export function InvoiceDoc({ inv, company, receipt }) {
         <div style={{ fontSize: 11, fontWeight: 700 }}>BILL TO</div>
         <b>{inv.customer_name}</b> {inv.customer_code && `(${inv.customer_code})`}<br />
         {inv.customer_address} {inv.customer_city}<br />
-        {inv.customer_trn && <>TRN: {inv.customer_trn}</>}
+        {inv.customer_trn && <>Tax no: {inv.customer_trn}</>}
       </div>
       <table style={{ border: '1px solid #ccc' }}>
         <thead><tr><th style={{ background: '#eef2f8', color: '#000' }}>Description</th><th className="num" style={{ background: '#eef2f8', color: '#000' }}>Taxable</th><th className="num" style={{ background: '#eef2f8', color: '#000' }}>VAT %</th><th className="num" style={{ background: '#eef2f8', color: '#000' }}>VAT</th><th className="num" style={{ background: '#eef2f8', color: '#000' }}>Total</th></tr></thead>
@@ -64,18 +64,18 @@ export function InvoiceDoc({ inv, company, receipt }) {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 10 }}>
         <table style={{ width: 280 }}>
           <tbody>
-            <tr><td>Subtotal (excl. VAT)</td><td className="num">{aed(inv.subtotal)}</td></tr>
-            <tr><td>VAT</td><td className="num">{aed(inv.vat)}</td></tr>
-            <tr><td><b>Total</b></td><td className="num"><b>{aed(inv.total)}</b></td></tr>
-            <tr><td>Paid</td><td className="num">{aed(inv.paid)}</td></tr>
-            <tr><td><b>Balance due</b></td><td className="num"><b>{aed(inv.total - inv.paid)}</b></td></tr>
+            <tr><td>Subtotal (excl. VAT)</td><td className="num">{money(inv.subtotal, inv.currency)}</td></tr>
+            <tr><td>VAT</td><td className="num">{money(inv.vat, inv.currency)}</td></tr>
+            <tr><td><b>Total</b></td><td className="num"><b>{money(inv.total, inv.currency)}</b></td></tr>
+            <tr><td>Paid</td><td className="num">{money(inv.paid, inv.currency)}</td></tr>
+            <tr><td><b>Balance due</b></td><td className="num"><b>{money(inv.total - inv.paid, inv.currency)}</b></td></tr>
           </tbody>
         </table>
       </div>
       {inv.payments?.length > 0 && (
-        <div style={{ marginTop: 8 }} className="small">Payments: {inv.payments.map((p) => `${p.method} ${aed(p.amount)} (${dt(p.created_at)})`).join(' · ')}</div>
+        <div style={{ marginTop: 8 }} className="small">Payments: {inv.payments.map((p) => `${p.method} ${money(p.amount, inv.currency)} (${dt(p.created_at)})`).join(' · ')}</div>
       )}
-      <div style={{ marginTop: 18, fontSize: 11, color: '#555' }}>Amounts in UAE Dirham (AED). Export shipments are zero-rated. This is a computer-generated document.</div>
+      <div style={{ marginTop: 18, fontSize: 11, color: '#555' }}>Amounts in {inv.currency || 'AED'}. Export shipments are zero-rated for VAT/GST. This is a computer-generated document.</div>
     </div>
   );
 }

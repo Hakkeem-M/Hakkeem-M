@@ -105,7 +105,7 @@ export function Manifests() {
   const [creating, setCreating] = useState(false);
   return (
     <>
-      <div className="page-head"><div><Link to="/intl" className="small">‹ International</Link><h1>Air manifests (consolidations)</h1></div>
+      <div className="page-head"><div><Link to="/intl" className="small">‹ International</Link><h1>Air & sea manifests (consolidations)</h1></div>
         <div className="row"><select value={st} onChange={(e) => setSt(e.target.value)} style={{ width: 200 }}><option value="OPEN,CLOSED,DEPARTED,ARRIVED">Active</option><option value="CLEARED,DELIVERED">Completed</option><option value="OPEN,CLOSED,DEPARTED,ARRIVED,CLEARED,DELIVERED">All</option></select>
           {['ADMIN', 'OPS'].includes(user.role) && <button className="btn primary" onClick={() => setCreating(true)}>+ New manifest</button>}</div></div>
       {list.loading && !list.data ? <Spinner /> : (
@@ -123,11 +123,11 @@ export function Manifests() {
 
 function ManifestModal({ m = {}, onClose, onDone }) {
   const meta = useLoad(() => api.get('/api/intl/meta'), []);
-  const [v, , bind] = useForm({ mode: 'AIR_COURIER', dest_airport: '', airline: '', flight_no: '', flight_date: '', mawb_no: '', agent_id: '', notes: '', ...m });
+  const [v, , bind] = useForm({ mode: 'AIR_COURIER', dest_airport: '', airline: '', flight_no: '', flight_date: '', mawb_no: '', agent_id: '', notes: '', vessel: '', container_no: '', ...m });
   const [run, busy] = useAction();
   const editing = !!m.id;
   const save = () => {
-    const body = Object.fromEntries(Object.entries(v).filter(([k, x]) => x !== '' && x != null && ['mode', 'dest_airport', 'airline', 'flight_no', 'flight_date', 'mawb_no', 'agent_id', 'notes'].includes(k)));
+    const body = Object.fromEntries(Object.entries(v).filter(([k, x]) => x !== '' && x != null && ['mode', 'dest_airport', 'airline', 'flight_no', 'flight_date', 'mawb_no', 'agent_id', 'notes', 'vessel', 'container_no'].includes(k)));
     if (body.agent_id) body.agent_id = Number(body.agent_id);
     if (editing) { delete body.mode; delete body.dest_airport; }
     return run(() => (editing ? api.patch(`/api/intl/manifests/${m.id}`, body) : api.post('/api/intl/manifests', body)), 'Manifest saved').then(onDone);
@@ -136,12 +136,14 @@ function ManifestModal({ m = {}, onClose, onDone }) {
   return (
     <Modal title={editing ? `Flight & MAWB — ${m.number}` : 'New air manifest'} onClose={onClose} footer={<button className="btn primary" disabled={busy || (!editing && !v.dest_airport)} onClick={save}>Save</button>}>
       <div className="grid g2">
-        {!editing && <Field label="Mode"><select {...bind('mode')}><option value="AIR_COURIER">Air courier (express consolidation)</option><option value="AIR_CARGO">Air cargo (incl. DG)</option></select></Field>}
-        {!editing && <Field label="Destination airport"><select {...bind('dest_airport')}><option value="">Select…</option>{intlAirports.map((a) => <option key={a.code} value={a.code}>{a.code} — {a.city} ({a.country})</option>)}</select></Field>}
+        {!editing && <Field label="Mode"><select {...bind('mode')}><option value="AIR_COURIER">Air courier (express consolidation)</option><option value="AIR_CARGO">Air cargo (incl. DG)</option><option value="SEA_CONSOL">Sea cargo consolidation (container)</option></select></Field>}
+        {!editing && <Field label={v.mode === 'SEA_CONSOL' ? 'Destination sea port' : 'Destination airport'}><select {...bind('dest_airport')}><option value="">Select…</option>
+          {intlAirports.filter((a) => (v.mode === 'SEA_CONSOL' ? a.kind === 'SEA' : a.kind !== 'SEA')).map((a) => <option key={a.code} value={a.code}>{a.code} — {a.city} ({a.country})</option>)}</select></Field>}
+        {v.mode === 'SEA_CONSOL' && <><Field label="Vessel"><input {...bind('vessel')} /></Field><Field label="Container no."><input {...bind('container_no')} /></Field></>}
         <Field label="Airline"><input {...bind('airline')} placeholder="e.g. Emirates SkyCargo" /></Field>
-        <Field label="Flight no."><input {...bind('flight_no')} placeholder="EK123" /></Field>
-        <Field label="Flight date"><input type="date" {...bind('flight_date')} /></Field>
-        <Field label="MAWB no." hint="Airline prefix-serial, e.g. 176-12345678"><input {...bind('mawb_no')} /></Field>
+        <Field label={v.mode === 'SEA_CONSOL' ? 'Voyage no.' : 'Flight no.'}><input {...bind('flight_no')} placeholder={v.mode === 'SEA_CONSOL' ? '024W' : 'EK123'} /></Field>
+        <Field label={v.mode === 'SEA_CONSOL' ? 'Sailing date' : 'Flight date'}><input type="date" {...bind('flight_date')} /></Field>
+        <Field label={v.mode === 'SEA_CONSOL' ? 'Bill of lading no.' : 'MAWB no.'} hint={v.mode === 'SEA_CONSOL' ? '' : 'Airline prefix-serial, e.g. 176-12345678'}><input {...bind('mawb_no')} /></Field>
         <Field label="Destination delivery agent"><select {...bind('agent_id')}><option value="">—</option>{meta.data?.agents.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.country})</option>)}</select></Field>
       </div>
       <Field label="Notes"><input {...bind('notes')} /></Field>

@@ -5,7 +5,7 @@ import { createRoot } from 'react-dom/client';
 import { HashRouter, Routes, Route, NavLink, useNavigate, useParams, Link } from 'react-router-dom';
 import '../shared/styles.css';
 import { createApi } from '../shared/api.js';
-import { SessionProvider, useSession, LoginForm } from '../shared/session.jsx';
+import { SessionProvider, useSession, LoginForm, demoAccount } from '../shared/session.jsx';
 import { ToastProvider, useLoad, useAction, Spinner, ErrorBox, Badge, Field, Empty, Modal, useForm } from '../shared/ui.jsx';
 import { aed, dt, mapsLink, telLink, waLink, SERVICES } from '../shared/format.js';
 import { SignaturePad, PhotoInput, getPosition, useGpsTracker, registerSW, CameraScanner } from '../shared/devices.jsx';
@@ -134,7 +134,8 @@ function PickupModal({ s, onClose, onDone }) {
   const [v, , bind] = useForm({ pieces: s.pieces, weight: s.weight, method: 'CASH', reference: '', note: '' });
   const [run, busy] = useAction();
   const [receipt, setReceipt] = useState(null);
-  const meta = useLoad(() => api.get('/api/public/meta'), []);
+  const { user } = useSession();
+  const meta = useLoad(() => api.get(`/api/public/meta?entity=${user.entity_code || 'AE'}`), []);
   const collect = s.payment_mode === 'CASH' && !s.invoice_id;
   const reweighed = Number(v.weight) !== s.weight || Number(v.pieces) !== s.pieces;
   const submit = async () => {
@@ -239,7 +240,9 @@ function FailModal({ s, onClose, onDone }) {
 
 function Book() {
   const nav = useNavigate();
-  const meta = useLoad(() => api.get('/api/public/meta'), []);
+  const { user } = useSession();
+  const region = user.entity_code || 'AE';
+  const meta = useLoad(() => api.get(`/api/public/meta?entity=${region}`), []);
   const [q, setQ] = useState('');
   const custs = useLoad(() => api.get(`/api/driver/customers?q=${encodeURIComponent(q)}`), [q]);
   const [cust, setCust] = useState(null);
@@ -260,8 +263,8 @@ function Book() {
             {q && custs.data?.filter((c) => c.code !== 'WALKIN').slice(0, 6).map((c) => <button key={c.id} className={`btn sm ${cust?.id === c.id ? 'primary' : ''}`} onClick={() => setCust(c)}>{c.name} · {c.type}</button>)}
           </div>
         </div>
-        <ShipmentForm api={api} quoteUrl="/api/driver/quote" mobile busy={busy} key={cust?.id || 'walkin'} showMap={false}
-          initial={cust ? { shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || 'Dubai' } : {}}
+        <ShipmentForm api={api} region={region} quoteUrl="/api/driver/quote" mobile busy={busy} key={cust?.id || 'walkin'} showMap={false}
+          initial={cust ? { shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || undefined } : {}}
           submitLabel={isCash ? 'Collect & book' : 'Book on account'}
           extra={() => isCash && (
             <div className="card flat stack"><b>Payment at pickup</b>
@@ -323,7 +326,7 @@ function App() {
   const { user } = useSession();
   gpsState = useGpsTracker(api, !!user, 30000);
   if (user === undefined) return <Spinner />;
-  if (!user) return <LoginForm title="ABC Driver" subtitle="Pickups · Deliveries · Billing" demo="driver1@abccargo.demo" accent="driver" />;
+  if (!user) return <LoginForm title="ABC Driver" subtitle="Pickups · Deliveries · Billing" demo={(r) => demoAccount('driver', r)} accent="driver" />;
   return (
     <div className="m-app">
       <Routes>

@@ -1,6 +1,9 @@
-# ABC Cargo & Courier — ERP + Mobile Apps
+# ABC Cargo & Courier — ERP + Mobile Apps (UAE · UK · KSA · India)
 
-International air courier & air cargo first; UAE domestic courier & logistics second.
+International air courier, air cargo and **sea cargo (door-to-door, per CBM)** first; domestic courier & logistics second.
+**Four regions, one platform:** each region (UAE, UK, KSA, India) is its own company with its own currency
+(AED / GBP / SAR / INR), VAT/GST (5 % / 20 % / 15 % / 18 %), rate cards, packing price list, branches and users.
+Regional users log in to their region and only ever see its data; group users (head office) can switch region or view all.
 One Node.js API serves four applications:
 
 | App | URL | Users | Highlights |
@@ -19,6 +22,13 @@ One Node.js API serves four applications:
 - DDP (duties billed to shipper) vs DAP (receiver pays, estimate shown); exports zero-rated for UAE VAT; dangerous-goods surcharge and DG → air cargo only
 - Air manifests: scan-to-consolidate with checks (destination match, hub stock, docs complete, DG), flight + MAWB, close → depart → arrive → clear (with holds) → hand over to overseas agent → agent POD; printable cargo manifest and CSV pre-alert (formula-injection safe)
 - Milestone tracking: Booked → Picked up → At hub → Manifested → Departed → Arrived → Customs cleared → With partner → Delivered
+
+**Regions & bookings (UK-ERP parity)**
+- Regional login on every app; region-bound accounts are refused in other regions; group admins pick a region or 🌐 all
+- Multi-box bookings: per box actual/volume/bill weight, CBM, packing type & charge, category; items per box; handling, other, discount, AWB/documentation charges
+- Quotations: price → send (WhatsApp / email / print) → accept → convert to booking (auto-creates the customer on first booking)
+- Saved receivers (address book) per customer; KYC: sender/receiver ID type, number, expiry + front/back images (staff only, views audited)
+- Sea consolidation manifests (vessel, voyage, container, bill of lading); regional sea/air gateways
 
 **Domestic & logistics (secondary)**
 - UAE LOCAL/DOMESTIC zones, Same Day / Express / Standard, COD with fee
@@ -51,13 +61,21 @@ npm start
 ```
 Open http://localhost:4000. For hot reload: `npm run dev:api` and `npm run dev:web` (http://localhost:5173).
 
-Demo logins (fictional data, password `Demo@2026`): `admin@`, `ops@`, `finance@`, `sales@`, `warehouse@`, `driver1@`, `driver2@`, `customer@`, `shop@` — all `@abccargo.demo`.
+Demo logins (fictional data, password `Demo@2026`, domain `@abccargo.demo`) — choose the region on the login screen:
+
+| Region | Users |
+|---|---|
+| 🌐 Group | `admin@` (all regions) |
+| 🇦🇪 UAE | `ops@`, `finance@`, `sales@`, `warehouse@`, `driver1@`, `customer@`, `shop@` |
+| 🇬🇧 UK | `admin.uk@`, `ops.uk@`, `finance.uk@`, `sales.uk@`, `warehouse.uk@`, `driver.uk@`, `customer.uk@` |
+| 🇸🇦 KSA | same pattern with `.ksa` |
+| 🇮🇳 India | same pattern with `.india` |
 
 ## Tests
 ```bash
 npm test
 ```
-13 API tests: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
+20 API tests (7 for regions: login rules, data isolation, multi-box sea pricing, regional VAT/GST, quotations, receivers & KYC, sea manifests) plus: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
 
 ## Deploy (production)
 ```bash

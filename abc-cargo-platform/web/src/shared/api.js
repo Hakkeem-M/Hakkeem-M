@@ -15,13 +15,16 @@ export { safeStore };
 
 export function createApi(appKey) {
   const key = `abc.${appKey}.token`;
+  const rkey = `abc.${appKey}.region`;
   let token = safeStore.get(key);
+  let region = safeStore.get(rkey); // AE | GB | SA | IN | null (all regions, group users only)
   let onUnauthorized = () => {};
 
   async function request(method, url, body) {
     const headers = { Accept: 'application/json' };
     if (body !== undefined) headers['Content-Type'] = 'application/json';
     if (token) headers.Authorization = `Bearer ${token}`;
+    if (region) headers['X-Entity'] = region;
     let res;
     try {
       res = await fetch(url, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -45,6 +48,8 @@ export function createApi(appKey) {
     del: (u) => request('DELETE', u),
     setToken(t) { token = t; safeStore.set(key, t); },
     get token() { return token; },
+    setRegion(r) { region = r || null; safeStore.set(rkey, region); },
+    get region() { return region; },
     onUnauthorized(fn) { onUnauthorized = fn; },
   };
 }

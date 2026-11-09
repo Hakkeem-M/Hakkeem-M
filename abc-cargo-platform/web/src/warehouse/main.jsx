@@ -4,7 +4,7 @@ import { StrictMode, useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../shared/styles.css';
 import { createApi, safeStore } from '../shared/api.js';
-import { SessionProvider, useSession, LoginForm } from '../shared/session.jsx';
+import { SessionProvider, useSession, LoginForm, demoAccount } from '../shared/session.jsx';
 import { ToastProvider, useLoad, Spinner, Badge, Field, Empty } from '../shared/ui.jsx';
 import { CameraScanner, feedback, registerSW } from '../shared/devices.jsx';
 import { dt } from '../shared/format.js';
@@ -19,7 +19,7 @@ const AWB_RE = /^ABC\d{9}$/;
 
 function Scanner() {
   const { user, logout } = useSession();
-  const branches = useLoad(() => api.get('/api/public/branches'), []);
+  const branches = useLoad(() => api.get('/api/admin/branches'), []);
   const drivers = useLoad(() => api.get('/api/warehouse/drivers'), []);
   const manifests = useLoad(() => api.get('/api/warehouse/manifests'), [], { interval: 60000 });
   const [branch, setBranch] = useState(() => safeStore.get('abc.wh.branch') || (user.branch_id ? String(user.branch_id) : ''));
@@ -114,7 +114,7 @@ function Scanner() {
         ) : (
           <div className="grid g2">
             <Field label="Purpose"><select value={purpose} onChange={(e) => setPurpose(e.target.value)}>
-              <option value="MANIFEST">✈️ Export — air manifest</option><option value="DELIVERY">🚚 Local delivery (courier)</option><option value="TRANSFER">↔ Transfer to branch</option><option value="RETURN">↩ Return to shipper</option></select></Field>
+              <option value="MANIFEST">✈️🚢 Export — air / sea manifest</option><option value="DELIVERY">🚚 Local delivery (courier)</option><option value="TRANSFER">↔ Transfer to branch</option><option value="RETURN">↩ Return to shipper</option></select></Field>
             {purpose === 'MANIFEST' && <Field label="Open manifest"><select value={manifest} onChange={(e) => setManifest(e.target.value)}><option value="">Select…</option>{manifests.data?.map((m) => <option key={m.id} value={m.id}>{m.dest_airport} · {m.flight_no || 'no flight'} · {m.shipments} AWB</option>)}</select></Field>}
             {purpose === 'DELIVERY' && <Field label="Courier (if not pre-assigned)"><select value={driver} onChange={(e) => setDriver(e.target.value)}><option value="">Use assigned</option>{drivers.data?.map((d) => <option key={d.id} value={d.id}>{d.name} · {d.vehicle_no}</option>)}</select></Field>}
             {purpose === 'TRANSFER' && <Field label="To branch"><select value={toBranch} onChange={(e) => setToBranch(e.target.value)}><option value="">Select…</option>{branches.data?.filter((b) => String(b.id) !== branch).map((b) => <option key={b.id} value={b.id}>{b.code}</option>)}</select></Field>}
@@ -163,7 +163,7 @@ function Inventory({ branch }) {
 function App() {
   const { user } = useSession();
   if (user === undefined) return <Spinner />;
-  if (!user) return <LoginForm title="ABC Hub Scanner" subtitle="IN / OUT · Export manifests · Offline-ready" demo="warehouse@abccargo.demo" accent="warehouse" />;
+  if (!user) return <LoginForm title="ABC Hub Scanner" subtitle="IN / OUT · Export manifests · Offline-ready" demo={(r) => demoAccount('warehouse', r)} accent="warehouse" />;
   return <Scanner />;
 }
 

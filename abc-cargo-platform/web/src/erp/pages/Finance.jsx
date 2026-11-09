@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, useMeta } from '../ctx.js';
 import { qs } from '../../shared/api.js';
 import { useLoad, useAction, Spinner, ErrorBox, Badge, Modal, Field, Empty, useForm } from '../../shared/ui.jsx';
-import { aed, dOnly, dt, ago } from '../../shared/format.js';
+import { aed, money, dOnly, dt, ago, REGIONS } from '../../shared/format.js';
 import { useSession } from '../../shared/session.jsx';
 import { InvoiceDoc } from '../../shared/docs.jsx';
 
@@ -21,7 +21,7 @@ export function Invoices() {
       <div className="card"><h3>Receivables by customer</h3>
         <table><thead><tr><th>Customer</th><th className="num">Open invoices</th><th className="num">Outstanding</th><th className="num">Overdue</th><th className="num">Credit limit</th></tr></thead>
           <tbody>{ar.data?.map((r) => <tr key={r.customer_id}><td><Link to={`/customers/${r.customer_id}`}>{r.name}</Link></td><td className="num">{r.open_invoices}</td>
-            <td className="num">{aed(r.outstanding)}</td><td className="num">{r.overdue > 0 ? <Badge tone="bad">{aed(r.overdue)}</Badge> : '—'}</td><td className="num">{r.credit_limit ? aed(r.credit_limit) : '—'}</td></tr>)}</tbody></table>
+            <td className="num">{money(r.outstanding, r.currency)}</td><td className="num">{r.overdue > 0 ? <Badge tone="bad">{money(r.overdue, r.currency)}</Badge> : '—'}</td><td className="num">{r.credit_limit ? money(r.credit_limit, r.currency) : '—'}</td></tr>)}</tbody></table>
         {ar.data && !ar.data.length && <Empty>No outstanding receivables.</Empty>}
       </div>
       <div className="filters">
@@ -34,8 +34,8 @@ export function Invoices() {
         <div className="table-wrap"><table>
           <thead><tr><th>Number</th><th>Customer</th><th>Type</th><th>Status</th><th>Issued</th><th>Due</th><th className="num">Lines</th><th className="num">Total</th><th className="num">Balance</th></tr></thead>
           <tbody>{list.data?.rows.map((i) => (
-            <tr key={i.id} className="clickable" onClick={() => nav(`/invoices/${i.id}`)}><td className="mono"><b>{i.number}</b></td><td>{i.customer_name}</td><td>{i.type}</td><td><Badge s={i.status} /></td>
-              <td>{dOnly(i.issue_date)}</td><td>{dOnly(i.due_date)}</td><td className="num">{i.line_count}</td><td className="num">{aed(i.total)}</td><td className="num">{aed(i.balance)}</td></tr>))}</tbody>
+            <tr key={i.id} className="clickable" onClick={() => nav(`/invoices/${i.id}`)}><td className="mono"><b>{i.number}</b></td><td>{i.customer_name}<div className="tiny muted">{REGIONS[i.entity_code]?.flag} {i.entity_code}</div></td><td>{i.type}</td><td><Badge s={i.status} /></td>
+              <td>{dOnly(i.issue_date)}</td><td>{dOnly(i.due_date)}</td><td className="num">{i.line_count}</td><td className="num">{money(i.total, i.currency)}</td><td className="num">{money(i.balance, i.currency)}</td></tr>))}</tbody>
         </table>{!list.data?.rows.length && <Empty>No invoices.</Empty>}</div>
       )}
       {billing && <BillingRun onClose={() => setBilling(false)} onDone={(inv) => nav(`/invoices/${inv.id}`)} />}
@@ -106,7 +106,7 @@ function PaymentModal({ inv, onClose, onDone }) {
         <Field label="Method"><select {...bind('method')}>{['BANK', 'CASH', 'CARD', 'ONLINE'].map((m) => <option key={m}>{m}</option>)}</select></Field>
         <Field label="Reference"><input {...bind('reference')} placeholder="TT / cheque / txn no." /></Field>
       </div>
-      <div className="small muted" style={{ marginTop: 8 }}>Balance due {aed(inv.balance)}</div>
+      <div className="small muted" style={{ marginTop: 8 }}>Balance due {money(inv.balance, inv.currency)}</div>
     </Modal>
   );
 }
@@ -132,14 +132,14 @@ export function CashCod() {
       <div className="page-head"><h1>Driver cash & COD</h1></div>
       <div className="card"><h3>Cash with drivers (not yet handed over)</h3>
         {cash.loading ? <Spinner /> : <table><thead><tr><th>Driver</th><th className="num">Cash in hand</th><th className="num">of which COD</th><th className="num">Card (info)</th><th className="num">Collections</th><th>Oldest</th><th /></tr></thead>
-          <tbody>{cash.data?.map((d) => <tr key={d.driver_id}><td>{d.name}<div className="tiny muted">{d.vehicle_no}</div></td><td className="num"><b>{aed(d.cash_in_hand)}</b></td>
-            <td className="num">{aed(d.cod_cash)}</td><td className="num">{aed(d.card_total)}</td><td className="num">{d.collections}</td><td className="small">{d.oldest ? ago(d.oldest) : '—'}</td>
+          <tbody>{cash.data?.map((d) => <tr key={d.driver_id}><td>{d.name}<div className="tiny muted">{d.vehicle_no}</div></td><td className="num"><b>{money(d.cash_in_hand, d.currency)}</b></td>
+            <td className="num">{money(d.cod_cash, d.currency)}</td><td className="num">{money(d.card_total, d.currency)}</td><td className="num">{d.collections}</td><td className="small">{d.oldest ? ago(d.oldest) : '—'}</td>
             <td className="right">{canWrite && d.collections > 0 && <button className="btn sm primary" disabled={busy} onClick={() => settle(d)}>Settle</button>}</td></tr>)}</tbody></table>}
         <div className="tiny muted">Settlement must match counted cash exactly; shortages must be investigated before closing.</div>
       </div>
       <div className="card"><h3>COD collected — pending remittance to shippers</h3>
         <table><thead><tr><th>Customer</th><th className="num">Shipments</th><th className="num">Amount</th><th /></tr></thead>
-          <tbody>{cod.data?.map((c) => <tr key={c.customer_id}><td>{c.name} ({c.code})</td><td className="num">{c.shipments}</td><td className="num"><b>{aed(c.amount)}</b></td>
+          <tbody>{cod.data?.map((c) => <tr key={c.customer_id}><td>{c.name} ({c.code})</td><td className="num">{c.shipments}</td><td className="num"><b>{money(c.amount, c.currency)}</b></td>
             <td className="right">{canWrite && <button className="btn sm" disabled={busy} onClick={() => remit(c)}>Mark remitted</button>}</td></tr>)}</tbody></table>
         {cod.data && !cod.data.length && <Empty>No COD pending.</Empty>}
       </div>

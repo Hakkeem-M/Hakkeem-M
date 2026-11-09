@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, useMeta } from '../ctx.js';
 import { qs } from '../../shared/api.js';
 import { useLoad, useAction, Spinner, ErrorBox, Badge, Modal, Field, Empty } from '../../shared/ui.jsx';
-import { aed, dt, ago, STATUS, SERVICES } from '../../shared/format.js';
+import { aed, money, dt, ago, STATUS, SERVICES, REGIONS } from '../../shared/format.js';
 import { useSession } from '../../shared/session.jsx';
 import ShipmentForm from '../../shared/ShipmentForm.jsx';
 import { ShippingLabel, CommercialInvoice } from '../../shared/docs.jsx';
@@ -14,7 +14,7 @@ export function ShipmentList() {
   const { user } = useSession();
   const [f, setF] = useState({ q: '', status: '', from: '', to: '', page: 1 });
   const [creating, setCreating] = useState(false);
-  const list = useLoad(() => api.get(`/api/shipments${qs({ ...f, limit: 50 })}`), [f.q, f.status, f.from, f.to, f.page, f.type]);
+  const list = useLoad(() => api.get(`/api/shipments${qs({ ...f, limit: 50 })}`), [f.q, f.status, f.from, f.to, f.page, f.type, f.mode]);
   const pages = list.data ? Math.max(1, Math.ceil(list.data.total / 50)) : 1;
   return (
     <>
@@ -24,6 +24,7 @@ export function ShipmentList() {
       </div>
       <div className="filters">
         <Field label="Search"><input placeholder="AWB, name, phone, ref" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value, page: 1 })} /></Field>
+        <Field label="Mode"><select value={f.mode || ''} onChange={(e) => setF({ ...f, mode: e.target.value, page: 1 })}><option value="">All</option><option value="AIR">✈️ Air</option><option value="SEA">🚢 Sea</option><option value="ROAD">🚚 Road</option></select></Field>
         <Field label="Type"><select value={f.type || ''} onChange={(e) => setF({ ...f, type: e.target.value, page: 1 })}><option value="">All</option><option value="INTERNATIONAL">International</option><option value="DOMESTIC">Domestic</option></select></Field>
         <Field label="Status"><select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value, page: 1 })}>
           <option value="">All</option>{Object.entries(STATUS).slice(0, 16).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></Field>
@@ -34,15 +35,16 @@ export function ShipmentList() {
       {list.loading && !list.data ? <Spinner /> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>AWB</th><th>Status</th><th>Customer</th><th>Route</th><th>Consignee</th><th>Service</th><th className="num">Wt</th><th className="num">COD</th><th className="num">Charge</th><th>Driver / Bin</th><th>Updated</th></tr></thead>
+            <thead><tr><th>AWB</th><th>Status</th><th>Region</th><th>Customer</th><th>Route</th><th>Consignee</th><th>Service</th><th className="num">Wt</th><th className="num">COD</th><th className="num">Charge</th><th>Driver / Bin</th><th>Updated</th></tr></thead>
             <tbody>
               {list.data?.rows.map((s) => (
                 <tr key={s.id} className="clickable" onClick={() => nav(`/shipments/${s.id}`)}>
-                  <td className="mono"><b>{s.awb}</b></td><td><Badge s={s.status} /></td><td>{s.customer_name}</td>
+                  <td className="mono"><b>{s.awb}</b></td><td><Badge s={s.status} /></td><td>{REGIONS[s.entity_code]?.flag} {s.entity_code}</td><td>{s.customer_name}</td>
                   <td>{s.dest_country !== 'AE' ? <><b>✈️ {s.dest_country}</b> {s.dest_city}</> : <>{s.origin_city} → {s.dest_city}</>}</td>
                   <td>{s.consignee_name}<div className="tiny muted">{s.consignee_phone}</div></td>
-                  <td>{SERVICES[s.service]}</td><td className="num">{s.chargeable_weight}</td>
-                  <td className="num">{s.cod_amount ? aed(s.cod_amount) : '—'}</td><td className="num">{aed(s.total_charge)}</td>
+                  <td>{s.mode === 'SEA' ? '🚢 ' : s.mode === 'AIR' ? '✈️ ' : ''}{SERVICES[s.service]}{s.box_count > 1 ? <div className="tiny muted">{s.box_count} boxes</div> : null}</td>
+                  <td className="num">{s.mode === 'SEA' ? `${s.cbm} CBM` : s.chargeable_weight}</td>
+                  <td className="num">{s.cod_amount ? money(s.cod_amount, s.currency) : '—'}</td><td className="num">{money(s.total_charge, s.currency)}</td>
                   <td>{s.driver_name || (s.bin ? `${s.branch_code} · ${s.bin}` : '—')}</td><td className="small muted">{ago(s.updated_at)}</td>
                 </tr>
               ))}
@@ -69,14 +71,14 @@ function NewShipment({ onClose, onDone }) {
   return (
     <Modal title="New shipment" onClose={onClose} wide>
       <div className="grid g2" style={{ marginBottom: 12 }}>
-        <Field label="Customer"><select value={cid} onChange={(e) => setCid(e.target.value)} required>
-          <option value="">Select customer…</option>{customers.data?.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.code} · {c.type})</option>)}</select></Field>
+        <Field label="Customer (sender)"><select value={cid} onChange={(e) => setCid(e.target.value)} required>
+          <option value="">Select customer…</option>{customers.data?.map((c) => <option key={c.id} value={c.id}>{REGIONS[c.entity_code]?.flag} {c.name} ({c.code} · {c.type})</option>)}</select></Field>
         <Field label="Payment"><select value={mode} onChange={(e) => setMode(e.target.value)}>
           <option value="">{cust?.type === 'ACCOUNT' ? 'On account (credit)' : 'Cash at pickup'}</option><option value="PREPAID">Prepaid (invoice now)</option></select></Field>
       </div>
       {cust && (
-        <ShipmentForm api={api} busy={busy} key={cust.id}
-          initial={{ shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || 'Dubai', pickup_lat: cust.lat, pickup_lng: cust.lng }}
+        <ShipmentForm api={api} busy={busy} key={cust.id} region={cust.entity_code} staff receiversUrl={`/api/quotations/customers/${cust.id}/receivers`}
+          initial={{ shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || undefined, pickup_lat: cust.lat, pickup_lng: cust.lng, agent_code: cust.agent_code || undefined }}
           onSubmit={async (body) => {
             const s = await run(() => api.post('/api/shipments', { ...body, customer_id: cust.id, payment_mode: mode || undefined }), 'Shipment booked');
             onDone(s);
@@ -109,7 +111,7 @@ export function ShipmentDetail() {
     <>
       <div className="page-head">
         <div><Link to="/shipments" className="small">‹ Shipments</Link><h1 className="mono">{s.awb} <Badge s={s.status} /></h1>
-          <div className="muted small">{s.customer_name} ({s.customer_code}) · booked {dt(s.created_at)} · {SERVICES[s.service]} · {s.zone}</div></div>
+          <div className="muted small">{REGIONS[s.entity_code]?.flag} {REGIONS[s.entity_code]?.name} · {s.customer_name} ({s.customer_code}) · booked {dt(s.created_at)} · {s.mode === 'SEA' ? '🚢' : s.mode === 'AIR' ? '✈️' : '🚚'} {SERVICES[s.service]} · {s.zone}{s.quotation_id ? ` · from quotation #${s.quotation_id}` : ''}</div></div>
         <div className="row">
           <button className="btn" onClick={() => setLabel(true)}>🖨️ Label</button>
           {s.shipment_type === 'INTERNATIONAL' && s.product !== 'DOCUMENT' && <button className="btn" onClick={() => setCi(true)}>🧾 Commercial invoice</button>}
@@ -124,12 +126,14 @@ export function ShipmentDetail() {
         <div className="card"><h3>Consignee</h3>{s.consignee_name}<div className="muted">{s.consignee_phone}</div><div>{s.consignee_address}, {s.dest_city} {s.dest_country}</div></div>
         <div className="card"><h3>Charges</h3>
           <table><tbody>
-            <tr><td>Freight</td><td className="num">{aed(s.freight)}</td></tr><tr><td>Fuel surcharge</td><td className="num">{aed(s.fuel_surcharge)}</td></tr>
-            {s.cod_fee > 0 && <tr><td>COD fee</td><td className="num">{aed(s.cod_fee)}</td></tr>}
-            <tr><td>VAT {s.vat_rate}%</td><td className="num">{aed(s.vat)}</td></tr><tr><td><b>Total</b></td><td className="num"><b>{aed(s.total_charge)}</b></td></tr>
+            {[['Freight', s.freight], ['Fuel surcharge', s.fuel_surcharge], ['Packing', s.packing_charge], ['AWB / documentation', s.awb_charge],
+              ['Handling', s.handling_charge], ['Other', s.other_charge], ['COD fee', s.cod_fee], ['DDP duties & taxes', s.duties_estimate],
+              ['Discount', s.discount ? -s.discount : 0]].filter(([, a]) => a).map(([l, a]) => <tr key={l}><td>{l}</td><td className="num">{money(a, s.currency)}</td></tr>)}
+            <tr><td>VAT/GST {s.vat_rate}%</td><td className="num">{money(s.vat, s.currency)}</td></tr><tr><td><b>Total</b></td><td className="num"><b>{money(s.total_charge, s.currency)}</b></td></tr>
           </tbody></table>
           <div className="small">Payment: <b>{s.payment_mode}</b>{s.invoice_id && <> · <Link to={`/invoices/${s.invoice_id}`}>{s.invoice_number}</Link> <Badge s={s.invoice_status} /></>}</div>
-          {s.cod_amount > 0 && <div className="small">COD {aed(s.cod_amount)} · collected {aed(s.cod_collected)}{s.cod_remittance_id ? ' · remitted' : ''}</div>}
+          {s.cod_amount > 0 && <div className="small">COD {money(s.cod_amount, s.currency)} · collected {money(s.cod_collected, s.currency)}{s.cod_remittance_id ? ' · remitted' : ''}</div>}
+          {s.agent_code && <div className="small">Agent code: {s.agent_code}</div>}
         </div>
       </div>
       <div className="grid g2">
@@ -141,7 +145,14 @@ export function ShipmentDetail() {
         </div>
         <div className="stack">
           {s.shipment_type === 'INTERNATIONAL' && <IntlPanel s={s} onChange={() => d.reload(true)} />}
-          <div className="card"><h3>Parcel</h3>{s.pieces} pcs · {s.weight} kg actual · <b>{s.chargeable_weight} kg chargeable</b>{s.length && ` · ${s.length}×${s.width}×${s.height} cm`}
+          {s.boxes?.length > 0 && (
+            <div className="card"><h3>Boxes ({s.boxes.length}) · {s.cbm} CBM</h3>
+              <div className="table-wrap"><table><thead><tr><th>Label</th><th className="num">Actual</th><th className="num">Dims</th><th className="num">Vol wt</th><th className="num">Bill wt</th><th className="num">CBM</th><th>Packing</th><th>Category</th></tr></thead>
+                <tbody>{s.boxes.map((b) => <tr key={b.id}><td className="mono small">{b.label}</td><td className="num">{b.actual_weight}</td><td className="num small">{b.length ? `${b.length}×${b.width}×${b.height}` : '—'}</td>
+                  <td className="num">{b.volume_weight}</td><td className="num">{b.bill_weight}</td><td className="num">{b.cbm}</td><td className="small">{b.packing_type}{b.packing_charge ? ` (${money(b.packing_charge, s.currency)})` : ''}</td><td className="small">{b.category}</td></tr>)}</tbody></table></div></div>
+          )}
+          <KycCard s={s} onChange={() => d.reload(true)} />
+          <div className="card"><h3>Parcel</h3>{s.pieces} pcs · {s.weight} kg actual · <b>{s.mode === 'SEA' ? `${s.cbm} CBM` : `${s.chargeable_weight} kg chargeable`}</b>{s.length && ` · ${s.length}×${s.width}×${s.height} cm`}
             <div className="small muted">{s.description} {s.reference && `· Ref ${s.reference}`}</div>
             <div className="small">Location: {s.branch_name ? `${s.branch_name}${s.bin ? ` · bin ${s.bin}` : ''}` : '—'} · Driver: {s.driver_name || '—'} · Attempts: {s.attempts}</div></div>
           {canOps && ['BOOKED', 'PICKUP_ASSIGNED', 'IN_WAREHOUSE', 'DELIVERY_FAILED'].includes(s.status) && (
@@ -167,5 +178,45 @@ export function ShipmentDetail() {
       {label && <Modal title="Shipping label" onClose={() => setLabel(false)} footer={<button className="btn primary" onClick={() => window.print()}>Print</button>}>
         <div className="print-area"><ShippingLabel s={s} company={meta.company} /></div></Modal>}
     </>
+  );
+}
+
+const DOC_TYPES = ['PASSPORT', 'EMIRATES_ID', 'CITIZEN_CARD', 'NATIONAL_ID', 'DRIVING_LICENCE', 'RESIDENCE_PERMIT', 'TRADE_LICENCE', 'OTHER'];
+const toDataUrl = (file) => new Promise((resolve, reject) => {
+  if (file.size > 1_500_000) { reject(new Error('Image must be under 1.5 MB')); return; }
+  const r = new FileReader(); r.onload = () => resolve(r.result); r.onerror = reject; r.readAsDataURL(file);
+});
+
+/** KYC: sender/receiver ID details on the booking + document images (staff only, views are audited). */
+export function KycCard({ s, ownerType = 'SHIPMENT', ownerId, onChange }) {
+  const id = ownerId || s?.id;
+  const docs = useLoad(() => api.get(`/api/quotations/documents?owner_type=${ownerType}&owner_id=${id}`), [id]);
+  const [v, setV] = useState({ doc_type: 'PASSPORT', doc_no: '', expiry: '', front_image: null, back_image: null });
+  const [img, setImg] = useState(null);
+  const [run, busy] = useAction();
+  const pick = (k) => async (e) => { const f = e.target.files?.[0]; if (f) { try { const u = await toDataUrl(f); setV((x) => ({ ...x, [k]: u })); } catch (er) { alert(er.message); } } };
+  const upload = () => run(() => api.post('/api/quotations/documents', { owner_type: ownerType, owner_id: id, doc_type: v.doc_type, doc_no: v.doc_no || undefined,
+    expiry: v.expiry || undefined, front_image: v.front_image || undefined, back_image: v.back_image || undefined }), 'Document saved').then(() => { setV({ doc_type: 'PASSPORT', doc_no: '', expiry: '', front_image: null, back_image: null }); docs.reload(true); onChange?.(); });
+  const view = (docId, side) => run(() => api.get(`/api/quotations/documents/${docId}/${side}`)).then((r) => setImg(r.image));
+  return (
+    <div className="card stack">
+      <h3>🪪 Identity documents (KYC)</h3>
+      {s && (s.sender_id_no || s.receiver_id_no) && <div className="small">Sender {s.sender_id_type || 'ID'}: <b>{s.sender_id_no || '—'}</b>{s.sender_id_expiry ? ` (exp ${s.sender_id_expiry})` : ''} · Receiver ID: <b>{s.receiver_id_no || '—'}</b></div>}
+      {docs.data?.length ? <table><tbody>{docs.data.map((d) => <tr key={d.id}><td>{d.doc_type}</td><td className="mono small">{d.doc_no || '—'}</td>
+        <td className="small">{d.expiry ? (d.expired ? <Badge tone="bad">Expired {d.expiry}</Badge> : `exp ${d.expiry}`) : ''}</td>
+        <td className="right">{d.has_front ? <button className="btn sm" onClick={() => view(d.id, 'front')}>Front</button> : null}{d.has_back ? <button className="btn sm" onClick={() => view(d.id, 'back')}>Back</button> : null}</td></tr>)}</tbody></table>
+        : <div className="small muted">No documents on file.</div>}
+      <div className="grid g4">
+        <Field label="Type"><select value={v.doc_type} onChange={(e) => setV({ ...v, doc_type: e.target.value })}>{DOC_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Field>
+        <Field label="Number"><input value={v.doc_no} onChange={(e) => setV({ ...v, doc_no: e.target.value })} /></Field>
+        <Field label="Expiry"><input type="date" value={v.expiry} onChange={(e) => setV({ ...v, expiry: e.target.value })} /></Field>
+        <div className="row" style={{ alignSelf: 'end' }}>
+          <label className="btn sm">Front{v.front_image ? ' ✓' : ''}<input type="file" accept="image/*" hidden onChange={pick('front_image')} /></label>
+          <label className="btn sm">Back{v.back_image ? ' ✓' : ''}<input type="file" accept="image/*" hidden onChange={pick('back_image')} /></label>
+          <button className="btn sm primary" disabled={busy} onClick={upload}>Save</button></div>
+      </div>
+      <div className="tiny muted">ID images are visible to Admin, Ops and Finance only; every view is recorded in the audit log.</div>
+      {img && <Modal title="Document image" onClose={() => setImg(null)}><img src={img} alt="Identity document" style={{ maxWidth: '100%' }} /></Modal>}
+    </div>
   );
 }
