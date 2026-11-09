@@ -23,7 +23,7 @@ export function requireAuth(req, _res, next) {
     return next(new HttpError(401, 'Session expired or invalid'));
   }
   const user = req.db.get(
-    'SELECT id, name, email, phone, role, customer_id, branch_id, vehicle_no, active, token_version FROM users WHERE id = ?',
+    'SELECT id, name, email, phone, role, customer_id, branch_id, vehicle_no, active, token_version, entity_code FROM users WHERE id = ?',
     Number(payload.sub),
   );
   if (!user || !user.active || user.token_version !== payload.tv) {
@@ -41,5 +41,5 @@ export const requireRole = (...roles) => (req, _res, next) => {
 
 export const publicUser = (u) => ({
   id: u.id, name: u.name, email: u.email, phone: u.phone, role: u.role,
-  customer_id: u.customer_id, branch_id: u.branch_id, vehicle_no: u.vehicle_no,
+  customer_id: u.customer_id, branch_id: u.branch_id, vehicle_no: u.vehicle_no, entity_code: u.entity_code ?? null,
 });

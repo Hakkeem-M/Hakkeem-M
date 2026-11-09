@@ -2,12 +2,13 @@
 import { Router } from 'express';
 import { requireRole, STAFF } from '../lib/auth.js';
 import { round2 } from '../lib/pricing.js';
+import { scopedDb } from '../lib/entity.js';
 
 const r = Router();
 r.use(requireRole(...STAFF));
 
 r.get('/dashboard', (req, res) => {
-  const db = req.db;
+  const db = scopedDb(req);
   const one = (sql, ...a) => db.get(sql, ...a);
   const statusCounts = Object.fromEntries(db.all('SELECT status, COUNT(*) AS n FROM shipments GROUP BY status').map((x) => [x.status, x.n]));
   const kpi = {
@@ -68,15 +69,24 @@ r.get('/dashboard', (req, res) => {
     `SELECT e.status, e.location, e.note, e.created_at, s.awb, s.id AS shipment_id, u.name AS user_name
        FROM shipment_events e JOIN shipments s ON s.id = e.shipment_id LEFT JOIN users u ON u.id = e.user_id
       ORDER BY e.id DESC LIMIT 15`);
-  res.json({ kpi, status_counts: statusCounts, days, by_service: byService, drivers, top_customers: topCustomers, destinations, recent });
+  const regions = req.db.all(
+    `SELECT e.code, e.name, e.currency,
+            (SELECT COUNT(*) FROM shipments s WHERE s.entity_code = e.code AND strftime('%Y-%m', s.created_at) = strftime('%Y-%m','now')) AS shipments_mtd,
+            (SELECT ROUND(COALESCE(SUM(total_charge),0),2) FROM shipments s WHERE s.entity_code = e.code AND s.status != 'CANCELLED'
+               AND strftime('%Y-%m', s.created_at) = strftime('%Y-%m','now')) AS revenue_mtd,
+            (SELECT ROUND(COALESCE(SUM(total - paid),0),2) FROM invoices i WHERE i.entity_code = e.code AND i.status IN ('UNPAID','PARTIAL')) AS ar_outstanding
+       FROM entities e WHERE e.active = 1 ${req.entity ? 'AND e.code = ?' : ''} ORDER BY e.rowid`, ...(req.entity ? [req.entity] : []));
+  const currency = req.entity ? req.db.get('SELECT currency FROM entities WHERE code = ?', req.entity).currency : null;
+  res.json({ entity: req.entity, currency, regions, kpi, status_counts: statusCounts, days, by_service: byService, drivers, top_customers: topCustomers, destinations, recent });
 });
 
 r.get('/exceptions', (req, res) => {
+  const db = scopedDb(req);
   res.json({
-    stuck_in_warehouse: req.db.all(
+    stuck_in_warehouse: db.all(
       `SELECT id, awb, dest_city, bin, updated_at FROM shipments WHERE status = 'IN_WAREHOUSE'
          AND (julianday('now') - julianday(updated_at)) > 2 ORDER BY updated_at LIMIT 100`),
-    failed_attempts: req.db.all("SELECT id, awb, dest_city, attempts, updated_at FROM shipments WHERE status = 'DELIVERY_FAILED' ORDER BY attempts DESC LIMIT 100"),
+    failed_attempts: db.all("SELECT id, awb, dest_city, attempts, updated_at FROM shipments WHERE status = 'DELIVERY_FAILED' ORDER BY attempts DESC LIMIT 100"),
     scan_exceptions: req.db.all("SELECT * FROM warehouse_scans WHERE result = 'EXCEPTION' ORDER BY id DESC LIMIT 100"),
     geofence: req.db.all("SELECT * FROM audit_log WHERE action = 'driver.geofence' ORDER BY id DESC LIMIT 100"),
   });

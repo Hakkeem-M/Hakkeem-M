@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getSettings } from '../db.js';
-import { SERVICES, ZONES, UAE_CITIES, quoteAll } from '../lib/pricing.js';
+import { SERVICES, ZONES, CITIES, quoteAll } from '../lib/pricing.js';
+import { settingsFor, packingMap, entityRow, DEFAULT_ENTITY } from '../lib/entity.js';
 import { STATUS_LABEL } from '../lib/shipments.js';
 import { validate, notFound, normalizeAwb, isValidAwb, badRequest } from '../lib/util.js';
 import { quoteInput } from '../lib/schemas.js';
@@ -10,14 +10,20 @@ const r = Router();
 const limiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'draft-7', legacyHeaders: false });
 r.use(limiter);
 
+// Public metadata for one region (?entity=AE|GB|SA|IN). Region list is always included for the login / region picker.
 r.get('/meta', (req, res) => {
-  const s = getSettings(req.db);
+  const code = String(req.query.entity || DEFAULT_ENTITY).toUpperCase();
+  const e = entityRow(req.db, code) ? code : DEFAULT_ENTITY;
+  const s = settingsFor(req.db, e);
   res.json({
-    company: { name: s.company_name, trn: s.company_trn, phone: s.company_phone, email: s.company_email, address: s.company_address },
-    services: SERVICES, zones: ZONES, cities: Object.keys(UAE_CITIES), statuses: STATUS_LABEL,
-    countries: Object.fromEntries([['AE', 'United Arab Emirates'], ...req.db.all('SELECT code, name FROM countries WHERE active = 1 ORDER BY name').map((c) => [c.code, c.name])]),
-    country_list: req.db.all('SELECT code, name, zone, airport FROM countries WHERE active = 1 ORDER BY name'),
-    currency: 'AED',
+    entity: e,
+    entities: req.db.all('SELECT code, name, currency, vat_rate_pct, tax_label, phone_prefix FROM entities WHERE active = 1 ORDER BY rowid'),
+    company: { name: s.company_name, trn: s.company_trn, tax_label: s.tax_label, phone: s.company_phone, email: s.company_email, address: s.company_address },
+    services: SERVICES, zones: ZONES, cities: Object.keys(CITIES[e] || {}), statuses: STATUS_LABEL,
+    countries: Object.fromEntries(req.db.all('SELECT code, name FROM countries WHERE active = 1 ORDER BY name').map((c) => [c.code, c.name])),
+    country_list: req.db.all('SELECT code, name, zone, airport FROM countries WHERE active = 1 AND code != ? ORDER BY name', e),
+    packing_types: req.db.all("SELECT code, name, amount FROM price_list WHERE entity_code = ? AND kind = 'PACKING' AND active = 1 ORDER BY amount", e),
+    currency: s.currency,
   });
 });
 
@@ -43,7 +49,8 @@ r.get('/track/:awb', (req, res) => {
 });
 
 r.post('/quote', validate(quoteInput), (req, res) => {
-  const quotes = quoteAll(req.db, getSettings(req.db), req.body);
+  const e = req.body.entity && entityRow(req.db, req.body.entity) ? req.body.entity : DEFAULT_ENTITY;
+  const quotes = quoteAll(req.db, settingsFor(req.db, e), req.body, packingMap(req.db, e));
   res.json({ quotes: req.body.service ? quotes.filter((q) => q.service === req.body.service) : quotes });
 });
 

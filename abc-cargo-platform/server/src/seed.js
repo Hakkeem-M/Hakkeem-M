@@ -19,21 +19,50 @@ export function seedBase(db) {
   };
   for (const [k, v] of Object.entries(settings)) db.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', k, v);
 
-  // International (primary): air courier express / economy and air freight cargo by zone.
-  const intl = {
-    INTL_EXPRESS: { Z1: [0.5, 75, 30, '1-2 days'], Z2: [0.5, 85, 35, '2-3 days'], Z3: [0.5, 110, 48, '3-4 days'], Z4: [0.5, 140, 55, '2-4 days'], Z5: [0.5, 165, 65, '3-5 days'], Z6: [0.5, 185, 75, '4-6 days'] },
-    INTL_ECONOMY: { Z1: [1, 55, 18, '3-5 days'], Z2: [1, 60, 20, '4-6 days'], Z3: [1, 80, 28, '5-8 days'], Z4: [1, 95, 32, '5-7 days'], Z5: [1, 110, 38, '6-9 days'], Z6: [1, 125, 45, '7-10 days'] },
-    AIR_CARGO: { Z1: [45, 315, 6.5, 'Airport-to-door 2-3 days', 350], Z2: [45, 340, 7.5, 'Airport-to-door 3-4 days', 380], Z3: [45, 495, 11, 'Airport-to-door 4-6 days', 450],
-      Z4: [45, 585, 13, 'Airport-to-door 3-5 days', 500], Z5: [45, 675, 15, 'Airport-to-door 4-6 days', 550], Z6: [45, 765, 17, 'Airport-to-door 5-7 days', 600] },
-  };
-  for (const [svc, zones] of Object.entries(intl)) {
-    for (const [zone, [bw, bp, pk, transit, min]] of Object.entries(zones)) {
-      db.run('INSERT OR IGNORE INTO rates (service, zone, base_weight, base_price, per_kg, transit, min_charge, divisor) VALUES (?,?,?,?,?,?,?,?)',
-        svc, zone, bw, bp, pk, transit, min || 0, svc === 'AIR_CARGO' ? 6000 : 5000);
-    }
+  // Regions / legal entities. Tax numbers are placeholders — set real values in Settings for production.
+  const entities = [
+    // code, name, currency, VAT %, tax label, tax no, phone prefix, fuel %, intl fuel %, AWB charge, air gateway, sea gateway, FX from AED
+    ['AE', 'ABC Cargo & Courier LLC (UAE)', 'AED', 5, 'TRN', '100000000000003', '+971', 8, 18, 25, 'DXB', 'AEJEA', 1],
+    ['GB', 'ABC Cargo & Courier UK Ltd', 'GBP', 20, 'VAT No', 'GB000000000', '+44', 6, 16, 5, 'LHR', 'GBFXT', 0.215],
+    ['SA', 'ABC Cargo & Courier KSA', 'SAR', 15, 'VAT No', '300000000000003', '+966', 8, 18, 25, 'RUH', 'SAJED', 1.02],
+    ['IN', 'ABC Cargo & Courier India Pvt Ltd', 'INR', 18, 'GSTIN', '00AAAAA0000A0Z0', '+91', 10, 20, 500, 'BOM', 'INNSA', 22.7],
+  ];
+  for (const e of entities) {
+    db.run(`INSERT OR IGNORE INTO entities (code, name, currency, vat_rate_pct, tax_label, tax_no, phone_prefix, fuel_surcharge_pct,
+              intl_fuel_surcharge_pct, awb_charge, gateway, sea_gateway) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`, ...e.slice(0, 12));
   }
+  const fx = Object.fromEntries(entities.map((e) => [e[0], e[12]]));
+  const money = (aed, code) => {
+    const v = aed * fx[code];
+    return code === 'IN' ? Math.round(v / 5) * 5 : Math.round(v * 2) / 2; // INR to nearest 5, others to 0.50
+  };
+
+  // Base rate card in AED, converted per region. International (primary) then domestic.
+  const card = {
+    INTL_EXPRESS: { unit: 'KG', zones: { Z1: [0.5, 75, 30, '1-2 days'], Z2: [0.5, 85, 35, '2-3 days'], Z3: [0.5, 110, 48, '3-4 days'], Z4: [0.5, 140, 55, '2-4 days'], Z5: [0.5, 165, 65, '3-5 days'], Z6: [0.5, 185, 75, '4-6 days'] } },
+    INTL_ECONOMY: { unit: 'KG', zones: { Z1: [1, 55, 18, '3-5 days'], Z2: [1, 60, 20, '4-6 days'], Z3: [1, 80, 28, '5-8 days'], Z4: [1, 95, 32, '5-7 days'], Z5: [1, 110, 38, '6-9 days'], Z6: [1, 125, 45, '7-10 days'] } },
+    AIR_CARGO: { unit: 'KG', divisor: 6000, zones: { Z1: [45, 315, 6.5, 'Airport-to-door 2-3 days', 350], Z2: [45, 340, 7.5, 'Airport-to-door 3-4 days', 380], Z3: [45, 495, 11, 'Airport-to-door 4-6 days', 450], Z4: [45, 585, 13, 'Airport-to-door 3-5 days', 500], Z5: [45, 675, 15, 'Airport-to-door 4-6 days', 550], Z6: [45, 765, 17, 'Airport-to-door 5-7 days', 600] } },
+    // Sea: base = minimum CBM, price for that volume, per extra CBM
+    SEA_CARGO: { unit: 'CBM', zones: { Z1: [1, 650, 550, 'Door-to-door 10-15 days', 650], Z2: [1, 750, 600, 'Door-to-door 25-35 days', 750], Z3: [1, 950, 800, 'Door-to-door 30-40 days', 950], Z4: [1, 1100, 900, 'Door-to-door 35-45 days', 1100], Z5: [1, 1400, 1200, 'Door-to-door 40-55 days', 1400], Z6: [1, 1300, 1100, 'Door-to-door 40-55 days', 1300] } },
+    SAME_DAY: { unit: 'KG', zones: { LOCAL: [5, 35, 3, 'Same day (book before 12:00)'] } },
+    EXPRESS: { unit: 'KG', zones: { LOCAL: [5, 25, 2, 'Next day'], DOMESTIC: [5, 30, 2.5, 'Next day'] } },
+    STANDARD: { unit: 'KG', zones: { LOCAL: [5, 18, 1.5, '1-2 days'], DOMESTIC: [5, 22, 2, '2-3 days'] } },
+  };
+  for (const [code] of entities) {
+    for (const [svc, def] of Object.entries(card)) {
+      for (const [zone, [bw, bp, pk, transit, min]] of Object.entries(def.zones)) {
+        db.run(`INSERT OR IGNORE INTO rates (entity_code, unit, service, zone, base_weight, base_price, per_kg, transit, min_charge, divisor)
+                VALUES (?,?,?,?,?,?,?,?,?,?)`, code, def.unit, svc, zone, bw, money(bp, code), money(pk, code), transit, money(min || 0, code), def.divisor || 5000);
+      }
+    }
+    const packing = [['NONE', 'Customer packed', 0], ['BOX_S', 'Carton — small', 10], ['BOX_M', 'Carton — medium', 15], ['BOX_L', 'Carton — large', 25],
+      ['BUBBLE', 'Bubble wrap', 10], ['SHRINK', 'Shrink wrap', 8], ['WOODEN', 'Wooden crate', 120], ['FRAGILE', 'Fragile packing', 35]];
+    for (const [c, n, amt] of packing) db.run('INSERT OR IGNORE INTO price_list (entity_code, kind, code, name, amount) VALUES (?, ?, ?, ?, ?)', code, 'PACKING', c, n, money(amt, code));
+  }
+
   // code, name, zone, airport, duty %, import VAT %, de-minimis (AED customs value)
   const countries = [
+    ['AE', 'United Arab Emirates', 'Z1', 'DXB', 5, 5, 1000],
     ['SA', 'Saudi Arabia', 'Z1', 'RUH', 5, 15, 1000], ['OM', 'Oman', 'Z1', 'MCT', 5, 5, 1000], ['QA', 'Qatar', 'Z1', 'DOH', 5, 0, 1000],
     ['KW', 'Kuwait', 'Z1', 'KWI', 5, 0, 1000], ['BH', 'Bahrain', 'Z1', 'BAH', 5, 10, 1000],
     ['IN', 'India', 'Z2', 'BOM', 20, 18, 0], ['PK', 'Pakistan', 'Z2', 'KHI', 20, 17, 0], ['BD', 'Bangladesh', 'Z2', 'DAC', 25, 15, 0],
@@ -56,28 +85,29 @@ export function seedBase(db) {
     ['JFK', 'John F. Kennedy Intl', 'New York', 'US'], ['YYZ', 'Toronto Pearson', 'Toronto', 'CA'], ['GRU', 'São Paulo Guarulhos', 'São Paulo', 'BR'], ['CAI', 'Cairo Intl', 'Cairo', 'EG'],
     ['NBO', 'Jomo Kenyatta Intl', 'Nairobi', 'KE'], ['LOS', 'Murtala Muhammed Intl', 'Lagos', 'NG'], ['JNB', 'O. R. Tambo Intl', 'Johannesburg', 'ZA']];
   for (const a of airports) db.run('INSERT OR IGNORE INTO airports (code, name, city, country) VALUES (?,?,?,?)', ...a);
+  const seaports = [['AEJEA', 'Jebel Ali', 'Dubai', 'AE'], ['GBFXT', 'Felixstowe', 'Felixstowe', 'GB'], ['GBLGP', 'London Gateway', 'Essex', 'GB'],
+    ['SAJED', 'Jeddah Islamic Port', 'Jeddah', 'SA'], ['SADMM', 'King Abdulaziz Port', 'Dammam', 'SA'], ['INNSA', 'Nhava Sheva (JNPT)', 'Mumbai', 'IN'],
+    ['INCOK', 'Cochin Port', 'Kochi', 'IN'], ['INMAA', 'Chennai Port', 'Chennai', 'IN'], ['PKKHI', 'Karachi Port', 'Karachi', 'PK'],
+    ['LKCMB', 'Colombo Port', 'Colombo', 'LK'], ['BDCGP', 'Chittagong', 'Chittagong', 'BD'], ['PHMNL', 'Manila Port', 'Manila', 'PH'],
+    ['OMSOH', 'Sohar', 'Sohar', 'OM'], ['DEHAM', 'Hamburg', 'Hamburg', 'DE'], ['USNYC', 'New York / New Jersey', 'New York', 'US']];
+  for (const a of seaports) db.run("INSERT OR IGNORE INTO airports (code, name, city, country, kind) VALUES (?,?,?,?,'SEA')", ...a);
 
-  const rates = [
-    ['SAME_DAY', 'LOCAL', 5, 35, 3, 'Same day (book before 12:00)'],
-    ['EXPRESS', 'LOCAL', 5, 25, 2, 'Next day'],
-    ['EXPRESS', 'DOMESTIC', 5, 30, 2.5, 'Next day'],
-    ['EXPRESS', 'GCC', 1, 95, 25, '2-3 days'],
-    ['EXPRESS', 'INTL', 1, 140, 45, '3-5 days'],
-    ['STANDARD', 'LOCAL', 5, 18, 1.5, '1-2 days'],
-    ['STANDARD', 'DOMESTIC', 5, 22, 2, '2-3 days'],
-    ['STANDARD', 'GCC', 1, 70, 18, '4-6 days'],
-    ['STANDARD', 'INTL', 1, 110, 38, '6-9 days'],
-  ];
-  for (const r of rates) {
-    db.run('INSERT OR IGNORE INTO rates (service, zone, base_weight, base_price, per_kg, transit) VALUES (?, ?, ?, ?, ?, ?)', ...r);
-  }
   const branches = [
-    ['DXB-HUB', 'Dubai Hub — Al Quoz', 'Dubai', 25.1367, 55.2283],
-    ['AUH-WH', 'Abu Dhabi — Mussafah', 'Abu Dhabi', 24.3604, 54.504],
-    ['SHJ-WH', 'Sharjah — Industrial Area', 'Sharjah', 25.31, 55.43],
+    ['DXB-HUB', 'AE', 'Dubai Hub — Al Quoz', 'Dubai', 25.1367, 55.2283],
+    ['AUH-WH', 'AE', 'Abu Dhabi — Mussafah', 'Abu Dhabi', 24.3604, 54.504],
+    ['SHJ-WH', 'AE', 'Sharjah — Industrial Area', 'Sharjah', 25.31, 55.43],
+    ['LON-HO', 'GB', 'Head Office UK — London', 'London', 51.5072, -0.1276],
+    ['BHM-BR', 'GB', 'Birmingham Branch', 'Birmingham', 52.4862, -1.8904],
+    ['RUH-HUB', 'SA', 'Riyadh Hub', 'Riyadh', 24.7136, 46.6753],
+    ['JED-BR', 'SA', 'Jeddah Branch', 'Jeddah', 21.4858, 39.1925],
+    ['COK-HUB', 'IN', 'Kochi Hub', 'Kochi', 9.9312, 76.2673],
+    ['BOM-BR', 'IN', 'Mumbai Branch', 'Mumbai', 19.076, 72.8777],
   ];
-  for (const b of branches) db.run('INSERT OR IGNORE INTO branches (code, name, city, lat, lng) VALUES (?, ?, ?, ?, ?)', ...b);
-  db.run("INSERT OR IGNORE INTO customers (code, name, type, city) VALUES ('WALKIN', 'Walk-in / Cash Customer', 'CASH', 'Dubai')");
+  for (const b of branches) db.run('INSERT OR IGNORE INTO branches (code, entity_code, name, city, lat, lng) VALUES (?, ?, ?, ?, ?, ?)', ...b);
+  const walkin = [['WALKIN', 'AE', 'Dubai'], ['WALKIN-GB', 'GB', 'London'], ['WALKIN-SA', 'SA', 'Riyadh'], ['WALKIN-IN', 'IN', 'Kochi']];
+  for (const [code, ent, city] of walkin) {
+    db.run("INSERT OR IGNORE INTO customers (code, entity_code, country, name, type, city) VALUES (?, ?, ?, 'Walk-in / Cash Customer', 'CASH', ?)", code, ent, ent, city);
+  }
 }
 
 function rng(seed) {
@@ -110,11 +140,12 @@ export function seedDemo(db) {
     const walkin = db.get("SELECT id FROM customers WHERE code = 'WALKIN'").id;
 
     const user = (name, email, role, extra = {}) => Number(db.run(
-      `INSERT INTO users (name, email, phone, password_hash, role, customer_id, branch_id, vehicle_no, capacity)
-       VALUES (?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO users (name, email, phone, password_hash, role, customer_id, branch_id, vehicle_no, capacity, entity_code)
+       VALUES (?,?,?,?,?,?,?,?,?,?)`,
       name, email, extra.phone || null, hash, role, extra.customer_id || null, extra.branch_id || null, extra.vehicle || null, extra.capacity || 25,
+      extra.entity === undefined ? 'AE' : extra.entity,
     ).lastInsertRowid);
-    const admin = user('System Admin', 'admin@abccargo.demo', 'ADMIN');
+    const admin = user('Group Admin (all regions)', 'admin@abccargo.demo', 'ADMIN', { entity: null });
     const ops = user('Ops Dispatcher', 'ops@abccargo.demo', 'OPS', { branch_id: dxb.id });
     user('Finance Officer', 'finance@abccargo.demo', 'FINANCE');
     const sales = user('Sales Executive', 'sales@abccargo.demo', 'SALES');
@@ -212,6 +243,44 @@ export function seedDemo(db) {
       setStatus(db, x.id, 'OUT_FOR_DELIVERY', { driver_id: d1, bin: null, route_seq: i + 1 });
       addEvent(db, x.id, 'OUT_FOR_DELIVERY', { note: 'Out for delivery with courier', userId: ops });
     });
+
+    // ---------------- Regional users & sample data (UK, KSA, India) ----------------
+    const regional = [
+      ['GB', 'LON-HO', 'uk', 'London', '+44 7700 900'], ['SA', 'RUH-HUB', 'ksa', 'Riyadh', '+966 50 000 0'], ['IN', 'COK-HUB', 'india', 'Kochi', '+91 98000 0'],
+    ];
+    for (const [ent, br, tag, city, ph] of regional) {
+      const b = branch(br);
+      user(`${tag.toUpperCase()} Admin`, `admin.${tag}@abccargo.demo`, 'ADMIN', { entity: ent, branch_id: b.id });
+      const rOps = user(`${tag.toUpperCase()} Operations`, `ops.${tag}@abccargo.demo`, 'OPS', { entity: ent, branch_id: b.id });
+      user(`${tag.toUpperCase()} Finance`, `finance.${tag}@abccargo.demo`, 'FINANCE', { entity: ent });
+      user(`${tag.toUpperCase()} Sales`, `sales.${tag}@abccargo.demo`, 'SALES', { entity: ent });
+      user(`${tag.toUpperCase()} Warehouse`, `warehouse.${tag}@abccargo.demo`, 'WAREHOUSE', { entity: ent, branch_id: b.id });
+      const rDrv = user(`${tag.toUpperCase()} Driver`, `driver.${tag}@abccargo.demo`, 'DRIVER', { entity: ent, branch_id: b.id, vehicle: `${tag.toUpperCase()}-V-1`, phone: `${ph}101` });
+      const code = `C${String(nextSeq(db, 'customer')).padStart(5, '0')}`;
+      const p0 = { lat: b.lat + 0.01, lng: b.lng + 0.01 };
+      const cid = Number(db.run(`INSERT INTO customers (code, entity_code, country, name, type, phone, email, address, city, credit_limit, lat, lng)
+        VALUES (?, ?, ?, ?, 'ACCOUNT', ?, ?, ?, ?, ?, ?, ?)`, code, ent, ent, `${city} Demo Traders (demo)`, `${ph}201`, `accounts.${tag}@example.com`,
+      `1 Demo Road, ${city}`, city, ent === 'IN' ? 500000 : 20000, p0.lat, p0.lng).lastInsertRowid);
+      user(`${city} Demo Traders (Customer)`, `customer.${tag}@abccargo.demo`, 'CUSTOMER', { entity: ent, customer_id: cid });
+      const rq = { user: { id: rOps }, ip: 'seed' };
+      const dests = ent === 'IN' ? [['AE', 'Dubai'], ['GB', 'London'], ['SA', 'Riyadh']] : [['IN', 'Kochi'], ['PK', 'Karachi'], ['PH', 'Manila']];
+      dests.forEach(([dc, dcity], i) => {
+        const sea = i === 0;
+        createShipment(db, rq, {
+          customer_id: cid, service: sea ? 'SEA_CARGO' : 'INTL_EXPRESS', origin_city: city, dest_city: dcity, dest_country: dc,
+          product: 'PARCEL', incoterm: 'DAP', export_reason: 'PERSONAL',
+          boxes: sea ? [{ actual_weight: 32, length: 60, width: 50, height: 50, packing_type: 'BOX_L', category: 'Household' },
+            { actual_weight: 28, length: 60, width: 45, height: 45, packing_type: 'BOX_L', category: 'Household' }]
+            : [{ actual_weight: 6.5, length: 40, width: 30, height: 30, packing_type: 'BOX_M', category: 'General' }],
+          shipper_name: `${city} Demo Traders (demo)`, shipper_phone: `${ph}201`, shipper_address: `1 Demo Road, ${city}`,
+          consignee_name: `Receiver ${i + 1} (demo)`, consignee_phone: '+971 50 000 9999', consignee_address: `${20 + i} Demo Street`, consignee_postcode: '000000',
+          items: [{ description: sea ? 'Personal effects — clothing' : 'Gift items', hs_code: sea ? '980300' : '950300', qty: sea ? 40 : 3, unit_value: 10, box_seq: 1 }],
+          pickup_lat: p0.lat, pickup_lng: p0.lng, save_receiver: true,
+        }, { paymentMode: 'ACCOUNT' });
+      });
+      db.run('INSERT INTO driver_locations (driver_id, lat, lng, speed, battery, recorded_at) VALUES (?, ?, ?, 6, 0.9, ?)', rDrv, b.lat, b.lng, new Date().toISOString());
+    }
+    db.run("UPDATE leads SET entity_code = 'AE'");
 
     // Live GPS: drivers around their zones (fresh fixes => "online").
     const now = Date.now();

@@ -45,6 +45,7 @@ export function processScan(db, req, input) {
     const branchId = input.branch_id || req.user.branch_id;
     const branch = branchId && db.get('SELECT * FROM branches WHERE id = ? AND active = 1', branchId);
     if (!branch) throw badRequest('Select a valid warehouse/branch');
+    if (req.entity && branch.entity_code !== req.entity) throw badRequest('Branch is in another region');
     const awb = normalizeAwb(input.awb);
     const s = db.get('SELECT * FROM shipments WHERE awb = ?', awb);
     const scannedAt = input.scanned_at || new Date().toISOString();
@@ -55,6 +56,8 @@ export function processScan(db, req, input) {
 
     if (!s) {
       result = 'EXCEPTION'; message = 'Unknown AWB — not in system';
+    } else if (s.entity_code !== branch.entity_code) {
+      result = 'EXCEPTION'; message = `Shipment belongs to region ${s.entity_code}`;
     } else if (['DELIVERED', 'CANCELLED', 'RETURNED'].includes(s.status)) {
       result = 'EXCEPTION'; message = `Shipment is ${STATUS_LABEL[s.status]}`;
     } else if (input.direction === 'IN') {
@@ -145,6 +148,7 @@ r.get('/inventory', (req, res) => {
   const branchId = Number(req.query.branch_id) || req.user.branch_id;
   const args = [];
   let w = "s.status = 'IN_WAREHOUSE'";
+  if (req.entity) { w += ' AND s.entity_code = ?'; args.push(req.entity); }
   if (branchId) { w += ' AND s.branch_id = ?'; args.push(branchId); }
   const rows = req.db.all(
     `SELECT s.id, s.awb, s.bin, s.service, s.dest_city, s.dest_country, s.shipment_type, s.customs_status, s.consignee_name, s.pieces, s.chargeable_weight, s.cod_amount,
@@ -176,11 +180,13 @@ r.get('/scans', (req, res) => {
 r.get('/manifests', (req, res) => {
   res.json(req.db.all(
     `SELECT m.id, m.number, m.mode, m.dest_airport, m.dest_country, m.flight_no, m.flight_date, COUNT(s.id) AS shipments
-       FROM manifests m LEFT JOIN shipments s ON s.manifest_id = m.id WHERE m.status = 'OPEN' GROUP BY m.id ORDER BY m.id DESC`));
+       FROM manifests m LEFT JOIN shipments s ON s.manifest_id = m.id WHERE m.status = 'OPEN' ${req.entity ? 'AND m.entity_code = ?' : ''}
+      GROUP BY m.id ORDER BY m.id DESC`, ...(req.entity ? [req.entity] : [])));
 });
 
 r.get('/drivers', (req, res) => {
-  res.json(req.db.all("SELECT id, name, vehicle_no, phone FROM users WHERE role = 'DRIVER' AND active = 1 ORDER BY name"));
+  res.json(req.db.all(`SELECT id, name, vehicle_no, phone FROM users WHERE role = 'DRIVER' AND active = 1
+    ${req.entity ? 'AND entity_code = ?' : ''} ORDER BY name`, ...(req.entity ? [req.entity] : [])));
 });
 
 export default r;

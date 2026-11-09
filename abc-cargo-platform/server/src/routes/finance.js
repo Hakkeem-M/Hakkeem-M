@@ -6,6 +6,7 @@ import { requireRole } from '../lib/auth.js';
 import { createInvoice, recordInvoicePayment } from '../lib/shipments.js';
 import { round2 } from '../lib/pricing.js';
 import { validate, idParam, notFound, conflict, badRequest, paginate } from '../lib/util.js';
+import { inEntity } from '../lib/entity.js';
 
 const r = Router();
 const READ = requireRole('ADMIN', 'FINANCE', 'OPS');
@@ -28,6 +29,7 @@ r.get('/invoices', READ, (req, res) => {
   const q = req.query;
   const where = [];
   const args = [];
+  if (req.entity) { where.push('i.entity_code = ?'); args.push(req.entity); }
   if (q.status) { where.push('i.status = ?'); args.push(String(q.status)); }
   if (q.customer_id) { where.push('i.customer_id = ?'); args.push(Number(q.customer_id)); }
   if (q.overdue === '1') where.push("i.status IN ('UNPAID','PARTIAL') AND date(i.due_date) < date('now')");
@@ -44,15 +46,14 @@ r.get('/invoices', READ, (req, res) => {
 });
 
 r.get('/invoices/:id', READ, (req, res) => {
-  const inv = invoiceDetail(req.db, idParam(req));
-  if (!inv) throw notFound('Invoice');
-  res.json(inv);
+  res.json(inEntity(req, invoiceDetail(req.db, idParam(req)), 'Invoice'));
 });
 
 // Uninvoiced billable shipments for a customer (account billing run preview).
 r.get('/billable', READ, (req, res) => {
   const cid = Number(req.query.customer_id);
   if (!cid) throw badRequest('customer_id required');
+  inEntity(req, req.db.get('SELECT entity_code FROM customers WHERE id = ?', cid), 'Customer');
   res.json(req.db.all(
     `SELECT id, awb, service, origin_city, dest_city, chargeable_weight, subtotal, vat, total_charge, status, created_at
        FROM shipments WHERE customer_id = ? AND invoice_id IS NULL AND status NOT IN ('CANCELLED','BOOKED','PICKUP_ASSIGNED')
@@ -66,6 +67,7 @@ r.post('/invoices/generate', WRITE, validate(z.object({
   notes: z.string().max(300).optional(),
 })), (req, res) => {
   const { customer_id: cid, shipment_ids: ids, to, notes } = req.body;
+  inEntity(req, req.db.get('SELECT entity_code FROM customers WHERE id = ?', cid), 'Customer');
   let ships;
   if (ids?.length) {
     ships = req.db.all(`SELECT * FROM shipments WHERE id IN (${ids.map(() => '?').join(',')})`, ...ids);
@@ -86,6 +88,7 @@ r.post('/invoices/:id/payments', WRITE, validate(z.object({
   reference: z.string().trim().max(60).optional(),
 })), (req, res) => {
   const id = idParam(req);
+  inEntity(req, req.db.get('SELECT entity_code FROM invoices WHERE id = ?', id), 'Invoice');
   recordInvoicePayment(req.db, req, id, req.body);
   // Payments received at the office are already "settled" (not in a courier's hand).
   res.status(201).json(invoiceDetail(req.db, id));
@@ -94,8 +97,7 @@ r.post('/invoices/:id/payments', WRITE, validate(z.object({
 r.post('/invoices/:id/void', requireRole('ADMIN'), validate(z.object({ reason: z.string().trim().min(3).max(200) })), (req, res) => {
   const id = idParam(req);
   req.db.tx(() => {
-    const inv = req.db.get('SELECT * FROM invoices WHERE id = ?', id);
-    if (!inv) throw notFound('Invoice');
+    const inv = inEntity(req, req.db.get('SELECT * FROM invoices WHERE id = ?', id), 'Invoice');
     if (inv.paid > 0) throw conflict('Invoice has payments; issue a credit note instead');
     if (inv.status === 'VOID') throw conflict('Already void');
     req.db.run("UPDATE invoices SET status = 'VOID', notes = COALESCE(notes || ' | ', '') || ? WHERE id = ?", `VOID: ${req.body.reason}`, id);
@@ -108,13 +110,13 @@ r.post('/invoices/:id/void', requireRole('ADMIN'), validate(z.object({ reason: z
 // ---- Driver cash control ----
 r.get('/driver-cash', READ, (req, res) => {
   res.json(req.db.all(
-    `SELECT u.id AS driver_id, u.name, u.vehicle_no,
+    `SELECT u.id AS driver_id, u.name, u.vehicle_no, u.entity_code, (SELECT currency FROM entities WHERE code = u.entity_code) AS currency,
             ROUND(COALESCE(SUM(CASE WHEN p.method = 'CASH' THEN p.amount END), 0), 2) AS cash_in_hand,
             ROUND(COALESCE(SUM(CASE WHEN p.method = 'CASH' AND p.kind = 'COD' THEN p.amount END), 0), 2) AS cod_cash,
             ROUND(COALESCE(SUM(CASE WHEN p.method = 'CARD' THEN p.amount END), 0), 2) AS card_total,
             COUNT(p.id) AS collections, MIN(p.created_at) AS oldest
        FROM users u LEFT JOIN payments p ON p.collected_by = u.id AND p.settlement_id IS NULL
-      WHERE u.role = 'DRIVER' GROUP BY u.id ORDER BY cash_in_hand DESC`));
+      WHERE u.role = 'DRIVER' ${req.entity ? 'AND u.entity_code = ?' : ''} GROUP BY u.id ORDER BY cash_in_hand DESC`, ...(req.entity ? [req.entity] : [])));
 });
 
 r.post('/driver-cash/:id/settle', WRITE, validate(z.object({
@@ -122,6 +124,7 @@ r.post('/driver-cash/:id/settle', WRITE, validate(z.object({
   note: z.string().trim().max(200).optional(),
 })), (req, res) => {
   const driverId = idParam(req);
+  inEntity(req, req.db.get("SELECT entity_code FROM users WHERE id = ? AND role = 'DRIVER'", driverId), 'Driver');
   const out = req.db.tx(() => {
     const due = round2(req.db.get(
       'SELECT COALESCE(SUM(amount),0) AS t FROM payments WHERE collected_by = ? AND settlement_id IS NULL', driverId).t);
@@ -144,20 +147,22 @@ r.post('/driver-cash/:id/settle', WRITE, validate(z.object({
 r.get('/settlements', READ, (req, res) => {
   res.json(req.db.all(
     `SELECT s.*, d.name AS driver_name, u.name AS received_by_name FROM cash_settlements s
-       JOIN users d ON d.id = s.driver_id JOIN users u ON u.id = s.received_by ORDER BY s.id DESC LIMIT 100`));
+       JOIN users d ON d.id = s.driver_id JOIN users u ON u.id = s.received_by ${req.entity ? 'WHERE d.entity_code = ?' : ''}
+      ORDER BY s.id DESC LIMIT 100`, ...(req.entity ? [req.entity] : [])));
 });
 
 // ---- COD remittance to shippers ----
 r.get('/cod', READ, (req, res) => {
   res.json(req.db.all(
-    `SELECT c.id AS customer_id, c.name, c.code, COUNT(s.id) AS shipments, ROUND(SUM(s.cod_collected), 2) AS amount
+    `SELECT c.id AS customer_id, c.name, c.code, c.entity_code, MAX(s.currency) AS currency, COUNT(s.id) AS shipments, ROUND(SUM(s.cod_collected), 2) AS amount
        FROM shipments s JOIN customers c ON c.id = s.customer_id
-      WHERE s.status = 'DELIVERED' AND s.cod_collected > 0 AND s.cod_remittance_id IS NULL
-      GROUP BY c.id ORDER BY amount DESC`));
+      WHERE s.status = 'DELIVERED' AND s.cod_collected > 0 AND s.cod_remittance_id IS NULL ${req.entity ? 'AND s.entity_code = ?' : ''}
+      GROUP BY c.id ORDER BY amount DESC`, ...(req.entity ? [req.entity] : [])));
 });
 
 r.post('/cod/:id/remit', WRITE, validate(z.object({ reference: z.string().trim().min(2).max(60) })), (req, res) => {
   const customerId = idParam(req);
+  inEntity(req, req.db.get('SELECT entity_code FROM customers WHERE id = ?', customerId), 'Customer');
   const out = req.db.tx(() => {
     const amt = round2(req.db.get(
       `SELECT COALESCE(SUM(cod_collected),0) AS t FROM shipments
@@ -177,12 +182,12 @@ r.post('/cod/:id/remit', WRITE, validate(z.object({ reference: z.string().trim()
 
 r.get('/receivables', READ, (req, res) => {
   res.json(req.db.all(
-    `SELECT c.id AS customer_id, c.name, c.code, c.credit_limit,
+    `SELECT c.id AS customer_id, c.name, c.code, c.credit_limit, c.entity_code, MAX(i.currency) AS currency,
             ROUND(SUM(i.total - i.paid), 2) AS outstanding,
             ROUND(SUM(CASE WHEN date(i.due_date) < date('now') THEN i.total - i.paid ELSE 0 END), 2) AS overdue,
             COUNT(i.id) AS open_invoices
        FROM invoices i JOIN customers c ON c.id = i.customer_id
-      WHERE i.status IN ('UNPAID','PARTIAL') GROUP BY c.id ORDER BY outstanding DESC`));
+      WHERE i.status IN ('UNPAID','PARTIAL') ${req.entity ? 'AND i.entity_code = ?' : ''} GROUP BY c.id ORDER BY outstanding DESC`, ...(req.entity ? [req.entity] : [])));
 });
 
 export default r;

@@ -9,6 +9,7 @@ import { invoiceDetail } from './finance.js';
 import { createTicket, ticketDetail } from './crm.js';
 import { validate, idParam, notFound, conflict, normalizeAwb, zText, HttpError } from '../lib/util.js';
 import { round2 } from '../lib/pricing.js';
+import { receiverRoutes } from './quotations.js';
 
 export default (config) => {
   const r = Router();
@@ -23,12 +24,14 @@ export default (config) => {
     const { pod_signature, created_by, driver_phone, ...rest } = s;
     rest.events = (s.events || []).filter((e) => e.public).map(({ status, location, note, created_at }) => ({ status, location, note, created_at }));
     delete rest.scans;
+    delete rest.documents;
     rest.has_pod = !!pod_signature;
     return rest;
   };
 
   r.get('/profile', (req, res) => {
-    const c = req.db.get('SELECT id, code, name, type, phone, email, address, city, trn, credit_limit, payment_terms_days FROM customers WHERE id = ?', req.user.customer_id);
+    const c = req.db.get(`SELECT c.id, c.code, c.name, c.type, c.phone, c.email, c.address, c.city, c.trn, c.credit_limit, c.payment_terms_days,
+                                 c.entity_code, e.name AS entity_name, e.currency FROM customers c JOIN entities e ON e.code = c.entity_code WHERE c.id = ?`, req.user.customer_id);
     const stats = req.db.get(
       `SELECT COUNT(*) AS total,
               SUM(CASE WHEN status NOT IN ('DELIVERED','CANCELLED','RETURNED') THEN 1 ELSE 0 END) AS active,
@@ -39,13 +42,16 @@ export default (config) => {
     res.json({ customer: c, stats: { ...stats, amount_due: due, cod_pending: cod }, payments_demo: config.paymentsDemo });
   });
 
+  receiverRoutes(r, { resolveCustomer: (req) => req.user.customer_id });
+
   r.get('/shipments', (req, res) => {
     const where = ['s.customer_id = ?'];
     const args = [req.user.customer_id];
     if (req.query.active === '1') where.push("s.status NOT IN ('DELIVERED','CANCELLED','RETURNED')");
     if (req.query.q) { where.push('(s.awb LIKE ? OR s.consignee_name LIKE ? OR s.reference LIKE ?)'); args.push(...Array(3).fill(`%${req.query.q}%`)); }
     res.json(req.db.all(
-      `SELECT s.id, s.awb, s.status, s.service, s.origin_city, s.dest_city, s.consignee_name, s.pieces, s.chargeable_weight,
+      `SELECT s.id, s.awb, s.status, s.service, s.origin_city, s.dest_city, s.dest_country, s.consignee_name, s.pieces, s.chargeable_weight,
+              s.currency, s.mode, s.box_count, s.cbm,
               s.cod_amount, s.total_charge, s.payment_mode, s.reference, s.created_at, s.delivered_at
          FROM shipments s WHERE ${where.join(' AND ')} ORDER BY s.id DESC LIMIT 200`, ...args));
   });
@@ -96,7 +102,7 @@ export default (config) => {
 
   r.get('/invoices', (req, res) => {
     res.json(req.db.all(
-      'SELECT id, number, type, status, issue_date, due_date, subtotal, vat, total, paid, ROUND(total - paid, 2) AS balance FROM invoices WHERE customer_id = ? ORDER BY id DESC',
+      'SELECT id, number, type, status, issue_date, due_date, subtotal, vat, total, paid, currency, ROUND(total - paid, 2) AS balance FROM invoices WHERE customer_id = ? ORDER BY id DESC',
       req.user.customer_id));
   });
 

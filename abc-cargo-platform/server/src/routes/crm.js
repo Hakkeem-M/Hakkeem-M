@@ -6,6 +6,7 @@ import { audit, nextSeq } from '../db.js';
 import { requireRole } from '../lib/auth.js';
 import { round2 } from '../lib/pricing.js';
 import { validate, idParam, notFound, conflict, zText, zPhone, paginate } from '../lib/util.js';
+import { inEntity, entityForWrite } from '../lib/entity.js';
 
 const r = Router();
 const CRM = requireRole('ADMIN', 'SALES', 'OPS', 'FINANCE');
@@ -38,6 +39,7 @@ const leadInput = z.object({
 r.get('/leads', CRM, (req, res) => {
   const where = [];
   const args = [];
+  if (req.entity) { where.push('l.entity_code = ?'); args.push(req.entity); }
   if (req.query.stage) { where.push('l.stage = ?'); args.push(String(req.query.stage)); }
   if (req.query.owner_id) { where.push('l.owner_id = ?'); args.push(Number(req.query.owner_id)); }
   if (req.query.q) { where.push('(l.company LIKE ? OR l.contact_name LIKE ? OR l.phone LIKE ?)'); args.push(...Array(3).fill(`%${req.query.q}%`)); }
@@ -52,7 +54,7 @@ r.get('/pipeline', CRM, (req, res) => {
   const stages = req.db.all(
     `SELECT stage, COUNT(*) AS count, ROUND(SUM(est_monthly_value), 2) AS value,
             ROUND(SUM(est_monthly_value * probability / 100.0), 2) AS weighted
-       FROM leads GROUP BY stage`);
+       FROM leads ${req.entity ? 'WHERE entity_code = ?' : ''} GROUP BY stage`, ...(req.entity ? [req.entity] : []));
   const by = Object.fromEntries(stages.map((s) => [s.stage, s]));
   const won = by.WON?.count || 0;
   const lost = by.LOST?.count || 0;
@@ -68,25 +70,23 @@ r.post('/leads', SALES, validate(leadInput), (req, res) => {
   const stage = b.stage || 'NEW';
   const ins = req.db.run(
     `INSERT INTO leads (company, contact_name, phone, email, city, source, stage, est_monthly_shipments, est_monthly_value,
-                        probability, expected_close, owner_id, notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+                        probability, expected_close, owner_id, notes, entity_code) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     b.company, b.contact_name, b.phone ?? null, b.email ?? null, b.city ?? null, b.source, stage, b.est_monthly_shipments,
-    b.est_monthly_value, STAGE_PROB[stage], b.expected_close ?? null, b.owner_id ?? req.user.id, b.notes ?? null);
+    b.est_monthly_value, STAGE_PROB[stage], b.expected_close ?? null, b.owner_id ?? req.user.id, b.notes ?? null, entityForWrite(req));
   audit(req.db, req, 'lead.create', 'lead', ins.lastInsertRowid, { company: b.company });
   res.status(201).json(req.db.get('SELECT * FROM leads WHERE id = ?', Number(ins.lastInsertRowid)));
 });
 
 r.get('/leads/:id', CRM, (req, res) => {
   const id = idParam(req);
-  const lead = req.db.get('SELECT l.*, u.name AS owner_name FROM leads l LEFT JOIN users u ON u.id = l.owner_id WHERE l.id = ?', id);
-  if (!lead) throw notFound('Lead');
+  const lead = inEntity(req, req.db.get('SELECT l.*, u.name AS owner_name FROM leads l LEFT JOIN users u ON u.id = l.owner_id WHERE l.id = ?', id), 'Lead');
   lead.activities = activitiesFor(req.db, 'LEAD', id);
   res.json(lead);
 });
 
 r.patch('/leads/:id', SALES, validate(leadInput.partial().extend({ lost_reason: z.string().trim().max(200).optional() })), (req, res) => {
   const id = idParam(req);
-  const lead = req.db.get('SELECT * FROM leads WHERE id = ?', id);
-  if (!lead) throw notFound('Lead');
+  const lead = inEntity(req, req.db.get('SELECT * FROM leads WHERE id = ?', id), 'Lead');
   if (lead.stage === 'WON') throw conflict('Lead already converted to a customer');
   if (req.body.stage === 'WON') throw conflict('Use "Convert to customer" to win a lead');
   if (req.body.stage === 'LOST' && !req.body.lost_reason && !lead.lost_reason) throw conflict('Lost reason is required');
@@ -115,14 +115,14 @@ r.post('/leads/:id/convert', SALES, validate(z.object({
   const id = idParam(req);
   const out = req.db.tx(() => {
     const lead = req.db.get('SELECT * FROM leads WHERE id = ?', id);
-    if (!lead) throw notFound('Lead');
+    inEntity(req, lead, 'Lead');
     if (lead.customer_id) throw conflict('Lead already converted');
     const code = `C${String(nextSeq(req.db, 'customer')).padStart(5, '0')}`;
     const c = req.db.run(
-      `INSERT INTO customers (code, name, type, phone, email, address, city, trn, credit_limit, payment_terms_days, account_manager_id)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+      `INSERT INTO customers (code, name, type, phone, email, address, city, trn, credit_limit, payment_terms_days, account_manager_id, entity_code, country)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       code, lead.company, req.body.type, lead.phone, lead.email, req.body.address ?? null, lead.city, req.body.trn ?? null,
-      req.body.credit_limit, req.body.payment_terms_days, lead.owner_id ?? req.user.id);
+      req.body.credit_limit, req.body.payment_terms_days, lead.owner_id ?? req.user.id, lead.entity_code, lead.entity_code);
     const cid = Number(c.lastInsertRowid);
     req.db.run('INSERT INTO contacts (customer_id, name, phone, email, is_primary) VALUES (?, ?, ?, ?, 1)', cid, lead.contact_name, lead.phone, lead.email);
     req.db.run("UPDATE leads SET stage = 'WON', probability = 100, customer_id = ?, updated_at = datetime('now') WHERE id = ?", cid, id);
@@ -142,7 +142,7 @@ r.post('/customers/:id/contacts', CRM, validate(z.object({
   name: zText(120), title: z.string().trim().max(80).optional(), phone: optPhone, email: optEmail, is_primary: z.boolean().default(false),
 })), (req, res) => {
   const cid = idParam(req);
-  if (!req.db.get('SELECT id FROM customers WHERE id = ?', cid)) throw notFound('Customer');
+  inEntity(req, req.db.get('SELECT id, entity_code FROM customers WHERE id = ?', cid), 'Customer');
   const b = req.body;
   const out = req.db.tx(() => {
     if (b.is_primary) req.db.run('UPDATE contacts SET is_primary = 0 WHERE customer_id = ?', cid);
@@ -197,14 +197,15 @@ r.get('/tasks', CRM, (req, res) => {
     `SELECT a.*, CASE a.entity WHEN 'LEAD' THEN l.company ELSE c.name END AS entity_name
        FROM activities a LEFT JOIN leads l ON a.entity = 'LEAD' AND l.id = a.entity_id
        LEFT JOIN customers c ON a.entity = 'CUSTOMER' AND c.id = a.entity_id
-      WHERE a.done = 0 AND a.due_at IS NOT NULL ${mine} ORDER BY a.due_at LIMIT 200`, ...(mine ? [req.user.id] : [])));
+      WHERE a.done = 0 AND a.due_at IS NOT NULL ${mine}
+        ${req.entity ? "AND COALESCE(l.entity_code, c.entity_code) = ?" : ''} ORDER BY a.due_at LIMIT 200`,
+    ...(mine ? [req.user.id] : []), ...(req.entity ? [req.entity] : [])));
 });
 
 // ---------------- Customer 360 ----------------
 r.get('/customers/:id/360', CRM, (req, res) => {
   const id = idParam(req);
-  const c = req.db.get('SELECT c.*, u.name AS account_manager FROM customers c LEFT JOIN users u ON u.id = c.account_manager_id WHERE c.id = ?', id);
-  if (!c) throw notFound('Customer');
+  const c = inEntity(req, req.db.get('SELECT c.*, u.name AS account_manager FROM customers c LEFT JOIN users u ON u.id = c.account_manager_id WHERE c.id = ?', id), 'Customer');
   const kpi = req.db.get(
     `SELECT COUNT(*) AS shipments,
             SUM(CASE WHEN date(created_at) >= date('now','-30 day') THEN 1 ELSE 0 END) AS shipments_30d,
@@ -237,10 +238,11 @@ export function createTicket(db, req, t) {
   const number = `TKT-${String(nextSeq(db, 'ticket')).padStart(6, '0')}`;
   const sla = new Date(Date.now() + SLA_HOURS[t.priority || 'MEDIUM'] * 3600_000).toISOString().replace('T', ' ').slice(0, 19);
   const ins = db.run(
-    `INSERT INTO tickets (number, customer_id, shipment_id, category, priority, channel, subject, description, created_by, sla_due_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?)`,
+    `INSERT INTO tickets (number, customer_id, shipment_id, category, priority, channel, subject, description, created_by, sla_due_at, entity_code)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
     number, t.customer_id ?? null, t.shipment_id ?? null, t.category, t.priority || 'MEDIUM', t.channel || 'PORTAL',
-    t.subject, t.description ?? null, req.user.id, sla);
+    t.subject, t.description ?? null, req.user.id, sla,
+    (t.customer_id && db.get('SELECT entity_code FROM customers WHERE id = ?', t.customer_id)?.entity_code) || entityForWrite(req));
   audit(db, req, 'ticket.create', 'ticket', number, { category: t.category });
   return db.get('SELECT * FROM tickets WHERE id = ?', Number(ins.lastInsertRowid));
 }
@@ -272,6 +274,7 @@ const ticketInput = z.object({
 r.get('/tickets', SUPPORT, (req, res) => {
   const where = [];
   const args = [];
+  if (req.entity) { where.push('t.entity_code = ?'); args.push(req.entity); }
   if (req.query.status) { where.push('t.status = ?'); args.push(String(req.query.status)); }
   if (req.query.open === '1') where.push("t.status NOT IN ('RESOLVED','CLOSED')");
   if (req.query.mine === '1') { where.push('t.assigned_to = ?'); args.push(req.user.id); }
@@ -298,9 +301,7 @@ r.post('/tickets', SUPPORT, validate(ticketInput), (req, res) => {
 });
 
 r.get('/tickets/:id', SUPPORT, (req, res) => {
-  const t = ticketDetail(req.db, idParam(req));
-  if (!t) throw notFound('Ticket');
-  res.json(t);
+  res.json(inEntity(req, ticketDetail(req.db, idParam(req)), 'Ticket'));
 });
 
 r.patch('/tickets/:id', SUPPORT, validate(z.object({
@@ -309,8 +310,7 @@ r.patch('/tickets/:id', SUPPORT, validate(z.object({
   assigned_to: z.coerce.number().int().positive().nullable().optional(),
 })), (req, res) => {
   const id = idParam(req);
-  const t = req.db.get('SELECT * FROM tickets WHERE id = ?', id);
-  if (!t) throw notFound('Ticket');
+  const t = inEntity(req, req.db.get('SELECT * FROM tickets WHERE id = ?', id), 'Ticket');
   const f = Object.fromEntries(Object.entries(req.body).filter(([, v]) => v !== undefined));
   if (f.status && ['RESOLVED', 'CLOSED'].includes(f.status) && !t.resolved_at) f.resolved_at = new Date().toISOString().replace('T', ' ').slice(0, 19);
   const keys = Object.keys(f);
@@ -321,7 +321,7 @@ r.patch('/tickets/:id', SUPPORT, validate(z.object({
 
 r.post('/tickets/:id/comments', SUPPORT, validate(z.object({ body: zText(4000), internal: z.boolean().default(false) })), (req, res) => {
   const id = idParam(req);
-  if (!req.db.get('SELECT id FROM tickets WHERE id = ?', id)) throw notFound('Ticket');
+  inEntity(req, req.db.get('SELECT id, entity_code FROM tickets WHERE id = ?', id), 'Ticket');
   req.db.run('INSERT INTO ticket_comments (ticket_id, user_id, body, internal) VALUES (?, ?, ?, ?)', id, req.user.id, req.body.body, req.body.internal ? 1 : 0);
   req.db.run("UPDATE tickets SET updated_at = datetime('now'), status = CASE WHEN status = 'OPEN' THEN 'IN_PROGRESS' ELSE status END WHERE id = ?", id);
   res.status(201).json(ticketDetail(req.db, id));

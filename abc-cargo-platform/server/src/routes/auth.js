@@ -31,8 +31,9 @@ export default (config) => {
     email: z.string().trim().email().max(160),
     password: z.string().min(1).max(128),
     app: z.enum(Object.keys(APP_ROLES)).optional(),
+    region: z.string().trim().toUpperCase().regex(/^[A-Z]{2,5}$/).optional(), // AE, GB, SA, IN or GROUP
   })), (req, res) => {
-    const { email, password: pw, app } = req.body;
+    const { email, password: pw, app, region } = req.body;
     const user = req.db.get('SELECT * FROM users WHERE email = ?', email);
     // Constant-ish time: always run a bcrypt compare.
     const ok = bcrypt.compareSync(pw, user?.password_hash || '$2a$10$invalidinvalidinvalidinvalidinvalidinvalidinvalidinva');
@@ -43,10 +44,18 @@ export default (config) => {
     if (app && !APP_ROLES[app].includes(user.role)) {
       throw new HttpError(403, `This account (${user.role}) cannot sign in to the ${app} app`);
     }
+    // Regional login: a region-bound account can only sign in to its own region; group accounts may choose any.
+    if (region && region !== 'GROUP' && user.entity_code && user.entity_code !== region) {
+      const e = req.db.get('SELECT name FROM entities WHERE code = ?', user.entity_code);
+      throw new HttpError(403, `This account belongs to ${e?.name || user.entity_code}. Choose that region to sign in.`);
+    }
+    if (region && region !== 'GROUP' && !req.db.get('SELECT 1 AS x FROM entities WHERE code = ? AND active = 1', region)) {
+      throw new HttpError(400, 'Unknown region');
+    }
     req.db.run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", user.id);
     req.user = user;
     audit(req.db, req, 'auth.login', 'user', user.id, { app });
-    res.json({ token: signToken(user, config), user: publicUser(user) });
+    res.json({ token: signToken(user, config), user: publicUser(user), region: user.entity_code || (region !== 'GROUP' ? region : null) || null });
   });
 
   // Public self-registration: creates a CASH (pay-per-shipment) customer account.
@@ -57,6 +66,7 @@ export default (config) => {
     phone: zPhone,
     address: z.string().trim().max(300).optional(),
     city: z.string().trim().max(60).optional(),
+    region: z.enum(['AE', 'GB', 'SA', 'IN']).default('AE'),
     password,
   })), (req, res) => {
     const b = req.body;
@@ -64,12 +74,12 @@ export default (config) => {
     const user = req.db.tx(() => {
       const code = `C${String(nextSeq(req.db, 'customer')).padStart(5, '0')}`;
       const c = req.db.run(
-        `INSERT INTO customers (code, name, type, phone, email, address, city) VALUES (?, ?, 'CASH', ?, ?, ?, ?)`,
-        code, b.company || b.name, b.phone, b.email, b.address ?? null, b.city ?? null,
+        `INSERT INTO customers (code, name, type, phone, email, address, city, entity_code, country) VALUES (?, ?, 'CASH', ?, ?, ?, ?, ?, ?)`,
+        code, b.company || b.name, b.phone, b.email, b.address ?? null, b.city ?? null, b.region, b.region,
       );
       const u = req.db.run(
-        `INSERT INTO users (name, email, phone, password_hash, role, customer_id) VALUES (?, ?, ?, ?, 'CUSTOMER', ?)`,
-        b.name, b.email, b.phone, bcrypt.hashSync(b.password, 10), Number(c.lastInsertRowid),
+        `INSERT INTO users (name, email, phone, password_hash, role, customer_id, entity_code) VALUES (?, ?, ?, ?, 'CUSTOMER', ?, ?)`,
+        b.name, b.email, b.phone, bcrypt.hashSync(b.password, 10), Number(c.lastInsertRowid), b.region,
       );
       return req.db.get('SELECT * FROM users WHERE id = ?', Number(u.lastInsertRowid));
     });
@@ -82,6 +92,8 @@ export default (config) => {
     const out = publicUser(req.user);
     if (req.user.customer_id) out.customer = req.db.get('SELECT id, code, name, type FROM customers WHERE id = ?', req.user.customer_id);
     if (req.user.branch_id) out.branch = req.db.get('SELECT id, code, name FROM branches WHERE id = ?', req.user.branch_id);
+    out.entity = req.user.entity_code ? req.db.get('SELECT code, name, currency, vat_rate_pct, tax_label, phone_prefix FROM entities WHERE code = ?', req.user.entity_code) : null;
+    out.regions = req.db.all('SELECT code, name, currency FROM entities WHERE active = 1 ORDER BY rowid');
     res.json(out);
   });
 

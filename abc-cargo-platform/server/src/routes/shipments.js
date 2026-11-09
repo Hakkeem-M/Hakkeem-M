@@ -8,6 +8,7 @@ import {
 } from '../lib/shipments.js';
 import { shipmentInput } from '../lib/schemas.js';
 import { validate, idParam, notFound, badRequest, conflict, paginate, normalizeAwb } from '../lib/util.js';
+import { inEntity } from '../lib/entity.js';
 
 const r = Router();
 r.use(requireRole(...STAFF));
@@ -16,6 +17,8 @@ r.get('/', (req, res) => {
   const q = req.query;
   const where = [];
   const args = [];
+  if (req.entity) { where.push('s.entity_code = ?'); args.push(req.entity); }
+  if (q.mode && ['AIR', 'SEA', 'ROAD'].includes(q.mode)) { where.push('s.mode = ?'); args.push(q.mode); }
   if (q.status) {
     const list = String(q.status).split(',').filter((s) => STATUSES.includes(s));
     if (list.length) { where.push(`s.status IN (${list.map(() => '?').join(',')})`); args.push(...list); }
@@ -39,7 +42,7 @@ r.get('/', (req, res) => {
     `SELECT s.id, s.awb, s.status, s.service, s.zone, s.payment_mode, s.origin_city, s.dest_city, s.dest_country,
             s.shipper_name, s.consignee_name, s.consignee_phone, s.pieces, s.chargeable_weight, s.cod_amount,
             s.total_charge, s.invoice_id, s.driver_id, s.branch_id, s.bin, s.attempts, s.created_at, s.updated_at,
-            s.shipment_type, s.customs_status, s.dest_airport,
+            s.shipment_type, s.customs_status, s.dest_airport, s.entity_code, s.currency, s.mode, s.box_count, s.cbm,
             c.name AS customer_name, u.name AS driver_name, b.code AS branch_code
        FROM shipments s JOIN customers c ON c.id = s.customer_id
        LEFT JOIN users u ON u.id = s.driver_id LEFT JOIN branches b ON b.id = s.branch_id
@@ -52,20 +55,18 @@ r.post('/', requireRole('ADMIN', 'OPS'), validate(shipmentInput.extend({
   customer_id: z.coerce.number().int().positive(),
   payment_mode: z.enum(['ACCOUNT', 'CASH', 'PREPAID']).optional(),
 })), (req, res) => {
+  inEntity(req, req.db.get('SELECT entity_code FROM customers WHERE id = ?', req.body.customer_id), 'Customer');
   const s = createShipment(req.db, req, req.body, { paymentMode: req.body.payment_mode });
   res.status(201).json(shipmentDetail(req.db, s.id));
 });
 
 r.get('/awb/:awb', (req, res) => {
-  const row = req.db.get('SELECT id FROM shipments WHERE awb = ?', normalizeAwb(req.params.awb));
-  if (!row) throw notFound('Shipment');
+  const row = inEntity(req, req.db.get('SELECT id, entity_code FROM shipments WHERE awb = ?', normalizeAwb(req.params.awb)), 'Shipment');
   res.json(shipmentDetail(req.db, row.id));
 });
 
 r.get('/:id', (req, res) => {
-  const s = shipmentDetail(req.db, idParam(req));
-  if (!s) throw notFound('Shipment');
-  res.json(s);
+  res.json(inEntity(req, shipmentDetail(req.db, idParam(req)), 'Shipment'));
 });
 
 // Assign a driver: BOOKED -> PICKUP_ASSIGNED, or set the delivery driver for a parcel waiting in the warehouse.
@@ -74,11 +75,12 @@ r.post('/assign', requireRole('ADMIN', 'OPS'), validate(z.object({
   driver_id: z.coerce.number().int().positive(),
 })), (req, res) => {
   const { shipment_ids: ids, driver_id: driverId } = req.body;
-  const driver = req.db.get("SELECT id, name FROM users WHERE id = ? AND role = 'DRIVER' AND active = 1", driverId);
+  const driver = req.db.get("SELECT id, name, entity_code FROM users WHERE id = ? AND role = 'DRIVER' AND active = 1", driverId);
   if (!driver) throw badRequest('Driver not found or inactive');
   const results = req.db.tx(() => ids.map((id) => {
     const s = req.db.get('SELECT * FROM shipments WHERE id = ?', id);
-    if (!s) return { id, ok: false, error: 'Not found' };
+    if (!s || (req.entity && s.entity_code !== req.entity)) return { id, ok: false, error: 'Not found' };
+    if (driver.entity_code && driver.entity_code !== s.entity_code) return { id, awb: s.awb, ok: false, error: 'Driver is in another region' };
     if (['BOOKED', 'PICKUP_ASSIGNED'].includes(s.status)) {
       setStatus(req.db, id, 'PICKUP_ASSIGNED', { driver_id: driverId });
       addEvent(req.db, id, 'PICKUP_ASSIGNED', { note: 'Courier assigned for pickup', userId: req.user.id, location: s.origin_city });
@@ -107,8 +109,7 @@ r.post('/:id/status', requireRole('ADMIN', 'OPS'), validate(z.object({
   note: z.string().trim().max(300).optional(),
 })), (req, res) => {
   const id = idParam(req);
-  const s = req.db.get('SELECT * FROM shipments WHERE id = ?', id);
-  if (!s) throw notFound('Shipment');
+  const s = inEntity(req, req.db.get('SELECT * FROM shipments WHERE id = ?', id), 'Shipment');
   const allowed = req.user.role === 'ADMIN' && !FINAL.has(s.status) ? STATUSES : (MANUAL[s.status] || []);
   if (!allowed.includes(req.body.status)) throw conflict(`Cannot change ${s.status} to ${req.body.status}`);
   if (req.body.status === 'CANCELLED' && s.invoice_id) throw conflict('Void the invoice before cancelling');

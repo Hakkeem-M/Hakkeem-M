@@ -6,13 +6,14 @@ import { requireRole } from '../lib/auth.js';
 import { addEvent, setStatus } from '../lib/shipments.js';
 import { autoRoute, optimiseSequence, pathKm, validPoint, AVG_SPEED_KMH, SERVICE_MIN_PER_STOP } from '../lib/geo.js';
 import { validate, badRequest, idParam, notFound, today } from '../lib/util.js';
+import { inEntity } from '../lib/entity.js';
 
 const r = Router();
 r.use(requireRole('ADMIN', 'OPS'));
 
 const ONLINE_MIN = 10;
 
-function fleet(db) {
+function fleet(db, entity) {
   return db.all(
     `SELECT u.id, u.name, u.phone, u.vehicle_no, u.capacity, u.branch_id,
             l.lat, l.lng, l.speed, l.heading, l.battery, l.recorded_at,
@@ -23,7 +24,7 @@ function fleet(db) {
        FROM users u
        LEFT JOIN driver_locations l ON l.id = (SELECT MAX(id) FROM driver_locations WHERE driver_id = u.id)
        LEFT JOIN branches b ON b.id = u.branch_id
-      WHERE u.role = 'DRIVER' AND u.active = 1 ORDER BY u.name`);
+      WHERE u.role = 'DRIVER' AND u.active = 1 ${entity ? 'AND u.entity_code = ?' : ''} ORDER BY u.name`, ...(entity ? [entity] : []));
 }
 
 const STOP_COLS = `s.id, s.awb, s.status, s.service, s.shipper_name, s.shipper_address, s.origin_city, s.consignee_name,
@@ -34,8 +35,9 @@ const STOP_COLS = `s.id, s.awb, s.status, s.service, s.shipper_name, s.shipper_a
 r.get('/live', (req, res) => {
   const stops = req.db.all(
     `SELECT ${STOP_COLS} FROM shipments s JOIN customers c ON c.id = s.customer_id
-      WHERE s.status IN ('BOOKED','PICKUP_ASSIGNED','OUT_FOR_DELIVERY') ORDER BY s.driver_id, COALESCE(s.route_seq, 9999)`);
-  res.json({ drivers: fleet(req.db), stops, generated_at: new Date().toISOString() });
+      WHERE s.status IN ('BOOKED','PICKUP_ASSIGNED','OUT_FOR_DELIVERY') ${req.entity ? 'AND s.entity_code = ?' : ''}
+      ORDER BY s.driver_id, COALESCE(s.route_seq, 9999)`, ...(req.entity ? [req.entity] : []));
+  res.json({ drivers: fleet(req.db, req.entity), stops, generated_at: new Date().toISOString() });
 });
 
 r.get('/drivers/:id/trail', (req, res) => {
@@ -64,7 +66,7 @@ function stopPoint(s, kind) {
  */
 r.post('/auto-plan', validate(planInput), (req, res) => {
   const b = req.body;
-  let drivers = fleet(req.db);
+  let drivers = fleet(req.db, req.entity);
   if (b.driver_ids?.length) drivers = drivers.filter((d) => b.driver_ids.includes(d.id));
   if (!drivers.length) throw badRequest('No active drivers available');
 
@@ -72,6 +74,7 @@ r.post('/auto-plan', validate(planInput), (req, res) => {
   const cityCol = b.kind === 'PICKUP' ? 's.origin_city' : 's.dest_city';
   const args = [...statusOpen];
   let where = `s.status IN (${statusOpen.map(() => '?').join(',')})`;
+  if (req.entity) { where += ' AND s.entity_code = ?'; args.push(req.entity); }
   if (b.kind === 'DELIVERY') where += ' AND s.driver_id IS NULL';
   if (b.city) { where += ` AND ${cityCol} = ?`; args.push(b.city); }
   const open = req.db.all(`SELECT ${STOP_COLS} FROM shipments s JOIN customers c ON c.id = s.customer_id WHERE ${where}`, ...args);
@@ -149,13 +152,12 @@ r.post('/manual', validate(z.object({
   optimise: z.boolean().default(false),
 })), (req, res) => {
   const b = req.body;
-  const d = fleet(req.db).find((x) => x.id === b.driver_id);
+  const d = fleet(req.db, req.entity).find((x) => x.id === b.driver_id);
   if (!d) throw badRequest('Driver not found or inactive');
   if (d.capacity && b.shipment_ids.length > d.capacity) throw badRequest(`Exceeds driver capacity (${d.capacity} stops)`);
   const start = d.online && validPoint(d) ? { lat: d.lat, lng: d.lng } : { lat: d.depot_lat, lng: d.depot_lng };
   const ships = b.shipment_ids.map((id) => {
-    const s = req.db.get('SELECT * FROM shipments WHERE id = ?', id);
-    if (!s) throw notFound(`Shipment ${id}`);
+    const s = inEntity(req, req.db.get('SELECT * FROM shipments WHERE id = ?', id), `Shipment ${id}`);
     return { ...s, ...stopPoint(s, b.kind) };
   });
   const located = ships.filter(validPoint);
@@ -197,7 +199,7 @@ r.get('/routes', (req, res) => {
     `SELECT rt.*, u.name AS driver_name, cb.name AS created_by_name,
             (SELECT COUNT(*) FROM shipments s WHERE s.route_id = rt.id AND s.status IN ('PICKUP_ASSIGNED','OUT_FOR_DELIVERY','IN_WAREHOUSE','DELIVERY_FAILED')) AS remaining
        FROM routes rt JOIN users u ON u.id = rt.driver_id LEFT JOIN users cb ON cb.id = rt.created_by
-      WHERE rt.route_date = ? ORDER BY rt.id DESC`, date);
+      WHERE rt.route_date = ? ${req.entity ? 'AND u.entity_code = ?' : ''} ORDER BY rt.id DESC`, date, ...(req.entity ? [req.entity] : []));
   res.json(routes);
 });
 

@@ -1,7 +1,8 @@
 // Driver mobile app API: run sheet, pickup with on-the-spot billing, POD delivery with COD, wallet.
 import { Router } from 'express';
 import { z } from 'zod';
-import { audit, getSettings } from '../db.js';
+import { audit } from '../db.js';
+import { settingsFor, packingMap } from '../lib/entity.js';
 import { requireRole } from '../lib/auth.js';
 import {
   createShipment, createInvoice, recordInvoicePayment, repriceShipment, setStatus, addEvent, shipmentDetail,
@@ -68,7 +69,8 @@ r.get('/lookup/:awb', (req, res) => {
 });
 
 r.post('/quote', validate(quoteInput), (req, res) => {
-  res.json({ quotes: quoteAll(req.db, getSettings(req.db), req.body) });
+  const e = req.user.entity_code || 'AE';
+  res.json({ quotes: quoteAll(req.db, settingsFor(req.db, e), req.body, packingMap(req.db, e)) });
 });
 
 r.get('/customers', (req, res) => {
@@ -99,10 +101,11 @@ r.post('/bookings', validate(shipmentInput.extend({
 })), (req, res) => {
   const b = req.body;
   const out = req.db.tx(() => {
-    const walkIn = req.db.get("SELECT id FROM customers WHERE code = 'WALKIN'");
+    const ent = req.user.entity_code || 'AE';
+    const walkIn = req.db.get("SELECT id FROM customers WHERE code = ?", ent === 'AE' ? 'WALKIN' : `WALKIN-${ent}`);
     const customerId = b.customer_id || walkIn?.id;
-    const customer = req.db.get('SELECT * FROM customers WHERE id = ?', customerId);
-    if (!customer) throw badRequest('Customer not found');
+    const customer = req.db.get('SELECT * FROM customers WHERE id = ? AND entity_code = ?', customerId, ent);
+    if (!customer) throw badRequest('Customer not found in your region');
     const s = createShipment(req.db, req, { ...b, customer_id: customer.id, pickup_lat: b.pickup_lat ?? b.lat, pickup_lng: b.pickup_lng ?? b.lng }, {
       status: 'PICKED_UP', driverId: req.user.id, paymentMode: customer.type === 'ACCOUNT' ? 'ACCOUNT' : 'CASH',
     });

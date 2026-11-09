@@ -3,9 +3,40 @@
 import { DatabaseSync } from 'node:sqlite';
 
 const SCHEMA = `
+-- Legal entities / operating countries (UAE, UK, ...). Currency, VAT and defaults per entity.
+CREATE TABLE IF NOT EXISTS entities (
+  code TEXT PRIMARY KEY,               -- ISO country of origin: AE, GB
+  name TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  vat_rate_pct REAL NOT NULL,
+  tax_label TEXT NOT NULL DEFAULT 'TRN',
+  tax_no TEXT,
+  phone_prefix TEXT NOT NULL,
+  address TEXT, phone TEXT, email TEXT,
+  fuel_surcharge_pct REAL NOT NULL DEFAULT 0,
+  intl_fuel_surcharge_pct REAL NOT NULL DEFAULT 0,
+  awb_charge REAL NOT NULL DEFAULT 0,
+  gateway TEXT,                        -- default export airport
+  sea_gateway TEXT,                    -- default export sea port
+  active INTEGER NOT NULL DEFAULT 1
+);
+
+-- Chargeable extras per entity: packing types and booking charges.
+CREATE TABLE IF NOT EXISTS price_list (
+  id INTEGER PRIMARY KEY,
+  entity_code TEXT NOT NULL REFERENCES entities(code),
+  kind TEXT NOT NULL CHECK (kind IN ('PACKING','CHARGE')),
+  code TEXT NOT NULL,
+  name TEXT NOT NULL,
+  amount REAL NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  UNIQUE (entity_code, kind, code)
+);
+
 CREATE TABLE IF NOT EXISTS branches (
   id INTEGER PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
+  entity_code TEXT NOT NULL DEFAULT 'AE' REFERENCES entities(code),
   name TEXT NOT NULL,
   city TEXT NOT NULL,
   lat REAL, lng REAL,
@@ -15,8 +46,11 @@ CREATE TABLE IF NOT EXISTS branches (
 CREATE TABLE IF NOT EXISTS customers (
   id INTEGER PRIMARY KEY,
   code TEXT UNIQUE NOT NULL,
+  entity_code TEXT NOT NULL DEFAULT 'AE' REFERENCES entities(code),
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('ACCOUNT','CASH')),
+  whatsapp TEXT, postcode TEXT, country TEXT NOT NULL DEFAULT 'AE',
+  agent_code TEXT,
   phone TEXT, email TEXT, address TEXT, city TEXT, trn TEXT,
   lat REAL, lng REAL,
   industry TEXT,
@@ -38,6 +72,7 @@ CREATE TABLE IF NOT EXISTS users (
   branch_id INTEGER REFERENCES branches(id),
   vehicle_no TEXT,
   capacity INTEGER NOT NULL DEFAULT 25,
+  entity_code TEXT REFERENCES entities(code),   -- NULL = all entities (group admin)
   active INTEGER NOT NULL DEFAULT 1,
   token_version INTEGER NOT NULL DEFAULT 0,
   last_login_at TEXT,
@@ -46,6 +81,8 @@ CREATE TABLE IF NOT EXISTS users (
 
 CREATE TABLE IF NOT EXISTS rates (
   id INTEGER PRIMARY KEY,
+  entity_code TEXT NOT NULL DEFAULT 'AE' REFERENCES entities(code),
+  unit TEXT NOT NULL DEFAULT 'KG' CHECK (unit IN ('KG','CBM')),
   service TEXT NOT NULL,
   zone TEXT NOT NULL,
   base_weight REAL NOT NULL,
@@ -55,7 +92,7 @@ CREATE TABLE IF NOT EXISTS rates (
   divisor REAL,
   transit TEXT,
   active INTEGER NOT NULL DEFAULT 1,
-  UNIQUE (service, zone)
+  UNIQUE (entity_code, service, zone)
 );
 
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -64,6 +101,8 @@ CREATE TABLE IF NOT EXISTS sequences (name TEXT PRIMARY KEY, value INTEGER NOT N
 CREATE TABLE IF NOT EXISTS invoices (
   id INTEGER PRIMARY KEY,
   number TEXT UNIQUE NOT NULL,
+  entity_code TEXT NOT NULL DEFAULT 'AE',
+  currency TEXT NOT NULL DEFAULT 'AED',
   customer_id INTEGER NOT NULL REFERENCES customers(id),
   type TEXT NOT NULL CHECK (type IN ('CASH','CREDIT')),
   status TEXT NOT NULL CHECK (status IN ('UNPAID','PARTIAL','PAID','VOID')),
@@ -90,6 +129,23 @@ CREATE TABLE IF NOT EXISTS shipments (
   pickup_lat REAL, pickup_lng REAL, dest_lat REAL, dest_lng REAL,
   pickup_window TEXT,
   route_id INTEGER, route_seq INTEGER,
+  entity_code TEXT NOT NULL DEFAULT 'AE',
+  order_branch_id INTEGER, invoice_branch_id INTEGER,
+  mode TEXT NOT NULL DEFAULT 'ROAD' CHECK (mode IN ('AIR','SEA','ROAD')),
+  sector TEXT,
+  box_count INTEGER NOT NULL DEFAULT 1,
+  cbm REAL NOT NULL DEFAULT 0,
+  packing_charge REAL NOT NULL DEFAULT 0,
+  awb_charge REAL NOT NULL DEFAULT 0,
+  handling_charge REAL NOT NULL DEFAULT 0,
+  other_charge REAL NOT NULL DEFAULT 0,
+  discount REAL NOT NULL DEFAULT 0,
+  receiver_id INTEGER,
+  quotation_id INTEGER,
+  agent_code TEXT,
+  sender_id_type TEXT, sender_id_no TEXT, sender_id_expiry TEXT,
+  receiver_id_type TEXT, receiver_id_no TEXT,
+  consignee_company TEXT, consignee_state TEXT, consignee_district TEXT,
   shipment_type TEXT NOT NULL DEFAULT 'DOMESTIC' CHECK (shipment_type IN ('DOMESTIC','INTERNATIONAL')),
   product TEXT NOT NULL DEFAULT 'PARCEL' CHECK (product IN ('DOCUMENT','PARCEL','CARGO')),
   incoterm TEXT CHECK (incoterm IN ('DAP','DDP')),
@@ -151,6 +207,7 @@ CREATE TABLE IF NOT EXISTS countries (
 );
 CREATE TABLE IF NOT EXISTS airports (
   code TEXT PRIMARY KEY,
+  kind TEXT NOT NULL DEFAULT 'AIR' CHECK (kind IN ('AIR','SEA')),
   name TEXT NOT NULL,
   city TEXT NOT NULL,
   country TEXT NOT NULL
@@ -171,13 +228,85 @@ CREATE TABLE IF NOT EXISTS shipment_items (
   qty INTEGER NOT NULL DEFAULT 1,
   unit_value REAL NOT NULL DEFAULT 0,
   weight REAL,
-  origin_country TEXT NOT NULL DEFAULT 'AE'
+  origin_country TEXT NOT NULL DEFAULT 'AE',
+  box_seq INTEGER
+);
+
+-- Individual boxes / packages of a booking (door-to-door cargo has many).
+CREATE TABLE IF NOT EXISTS shipment_boxes (
+  id INTEGER PRIMARY KEY,
+  shipment_id INTEGER NOT NULL REFERENCES shipments(id),
+  seq INTEGER NOT NULL,
+  label TEXT NOT NULL,                 -- AWB-01, AWB-02 ... (scannable)
+  actual_weight REAL NOT NULL,
+  length REAL, width REAL, height REAL,
+  volume_weight REAL NOT NULL DEFAULT 0,
+  bill_weight REAL NOT NULL,
+  cbm REAL NOT NULL DEFAULT 0,
+  category TEXT,
+  packing_type TEXT,
+  packing_charge REAL NOT NULL DEFAULT 0,
+  UNIQUE (shipment_id, seq)
+);
+
+-- Saved receivers (address book) per customer.
+CREATE TABLE IF NOT EXISTS receivers (
+  id INTEGER PRIMARY KEY,
+  customer_id INTEGER NOT NULL REFERENCES customers(id),
+  name TEXT NOT NULL, company TEXT,
+  phone TEXT NOT NULL, whatsapp TEXT, email TEXT,
+  country TEXT NOT NULL, state TEXT, district TEXT, city TEXT NOT NULL, postcode TEXT,
+  address TEXT NOT NULL,
+  tax_id TEXT, national_id TEXT, relation TEXT,
+  use_count INTEGER NOT NULL DEFAULT 0,
+  last_used_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_receivers_customer ON receivers(customer_id);
+
+-- KYC / identity documents (images are sensitive: staff-only, never in public endpoints).
+CREATE TABLE IF NOT EXISTS documents (
+  id INTEGER PRIMARY KEY,
+  owner_type TEXT NOT NULL CHECK (owner_type IN ('CUSTOMER','RECEIVER','SHIPMENT')),
+  owner_id INTEGER NOT NULL,
+  doc_type TEXT NOT NULL CHECK (doc_type IN ('PASSPORT','EMIRATES_ID','CITIZEN_CARD','NATIONAL_ID','DRIVING_LICENCE','RESIDENCE_PERMIT','TRADE_LICENCE','OTHER')),
+  doc_no TEXT,
+  expiry TEXT,
+  front_image TEXT, back_image TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_docs_owner ON documents(owner_type, owner_id);
+
+-- Quotations: priced proposals that convert into bookings.
+CREATE TABLE IF NOT EXISTS quotations (
+  id INTEGER PRIMARY KEY,
+  number TEXT UNIQUE NOT NULL,
+  entity_code TEXT NOT NULL,
+  currency TEXT NOT NULL,
+  customer_id INTEGER REFERENCES customers(id),
+  lead_id INTEGER REFERENCES leads(id),
+  contact_name TEXT NOT NULL, contact_phone TEXT, contact_email TEXT,
+  service TEXT NOT NULL,
+  origin_city TEXT NOT NULL, dest_country TEXT NOT NULL, dest_city TEXT NOT NULL,
+  payload TEXT NOT NULL,               -- full booking input (JSON)
+  pricing TEXT NOT NULL,               -- priced breakdown (JSON)
+  total REAL NOT NULL,
+  valid_until TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'DRAFT' CHECK (status IN ('DRAFT','SENT','ACCEPTED','REJECTED','EXPIRED','CONVERTED')),
+  notes TEXT,
+  shipment_id INTEGER REFERENCES shipments(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS ix_items_ship ON shipment_items(shipment_id);
 CREATE TABLE IF NOT EXISTS manifests (
   id INTEGER PRIMARY KEY,
+  entity_code TEXT NOT NULL DEFAULT 'AE',
   number TEXT UNIQUE NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('AIR_COURIER','AIR_CARGO')),
+  mode TEXT NOT NULL CHECK (mode IN ('AIR_COURIER','AIR_CARGO','SEA_CONSOL')),
+  container_no TEXT, vessel TEXT,
   origin_airport TEXT NOT NULL,
   dest_airport TEXT NOT NULL,
   dest_country TEXT NOT NULL,
@@ -290,6 +419,7 @@ CREATE TABLE IF NOT EXISTS routes (
 -- ---------- CRM ----------
 CREATE TABLE IF NOT EXISTS leads (
   id INTEGER PRIMARY KEY,
+  entity_code TEXT NOT NULL DEFAULT 'AE',
   company TEXT NOT NULL,
   contact_name TEXT NOT NULL,
   phone TEXT, email TEXT, city TEXT,
@@ -328,6 +458,7 @@ CREATE TABLE IF NOT EXISTS activities (
 CREATE INDEX IF NOT EXISTS ix_act_entity ON activities(entity, entity_id);
 CREATE TABLE IF NOT EXISTS tickets (
   id INTEGER PRIMARY KEY,
+  entity_code TEXT NOT NULL DEFAULT 'AE',
   number TEXT UNIQUE NOT NULL,
   customer_id INTEGER REFERENCES customers(id),
   shipment_id INTEGER REFERENCES shipments(id),
