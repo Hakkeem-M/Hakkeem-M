@@ -5,6 +5,8 @@ import path from 'node:path';
 import { requireAuth } from './lib/auth.js';
 import { resolveEntity } from './lib/entity.js';
 import quotationRoutes from './routes/quotations.js';
+import inboxRoutes from './routes/inbox.js';
+import pickupRoutes from './routes/pickups.js';
 import { HttpError } from './lib/util.js';
 import authRoutes from './routes/auth.js';
 import publicRoutes from './routes/public.js';
@@ -61,6 +63,8 @@ export function createApp({ db, config }) {
   app.use('/api/crm', staff, crmRoutes);
   app.use('/api/intl', staff, intlRoutes);
   app.use('/api/quotations', staff, quotationRoutes);
+  app.use('/api/inbox', staff, inboxRoutes);
+  app.use('/api/pickups', staff, pickupRoutes);
   app.use('/api/customer', requireAuth, customerRoutes(config));
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'API route not found')));
 

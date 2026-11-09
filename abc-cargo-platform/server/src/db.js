@@ -494,13 +494,67 @@ CREATE TABLE IF NOT EXISTS audit_log (
   ip TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Omnichannel agent inbox: every enquiry (call, WhatsApp, email, social, web, walk-in) in one place.
+CREATE TABLE IF NOT EXISTS enquiries (
+  id INTEGER PRIMARY KEY,
+  ref TEXT UNIQUE NOT NULL,
+  entity_code TEXT NOT NULL DEFAULT 'AE' REFERENCES entities(code),
+  channel TEXT NOT NULL CHECK (channel IN ('PHONE','WHATSAPP','EMAIL','WEBSITE','FACEBOOK','INSTAGRAM','LINKEDIN','TIKTOK','WALKIN','REFERRAL')),
+  lead_type TEXT NOT NULL DEFAULT 'GENERAL' CHECK (lead_type IN ('COLLECTION','QUOTE','GENERAL','TRACKING','COMPLAINT')),
+  status TEXT NOT NULL DEFAULT 'NEW' CHECK (status IN ('NEW','QUOTED','BOOKED','LOST','CLOSED')),
+  customer_name TEXT NOT NULL,
+  mobile TEXT NOT NULL, whatsapp TEXT, landline TEXT, alt_phone TEXT, email TEXT,
+  id_type TEXT, id_number TEXT, id_expiry TEXT,
+  agent_code TEXT, country TEXT, postcode TEXT,
+  address1 TEXT, address2 TEXT, address3 TEXT, city TEXT, district TEXT, region TEXT,
+  lat REAL, lng REAL,
+  service TEXT, dest_country TEXT, dest_city TEXT, pieces INTEGER, weight_kg REAL, contents TEXT,
+  receiver_name TEXT, receiver_phone TEXT, receiver_address TEXT,
+  pickup_date TEXT, pickup_window TEXT,
+  description TEXT NOT NULL,
+  next_action_at TEXT,
+  lost_reason TEXT,
+  owner_id INTEGER REFERENCES users(id),
+  customer_id INTEGER REFERENCES customers(id),
+  shipment_id INTEGER REFERENCES shipments(id),
+  quotation_id INTEGER REFERENCES quotations(id),
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_enq_entity_status ON enquiries(entity_code, status);
+CREATE INDEX IF NOT EXISTS ix_enq_mobile ON enquiries(mobile);
+CREATE TABLE IF NOT EXISTS enquiry_messages (
+  id INTEGER PRIMARY KEY,
+  enquiry_id INTEGER NOT NULL REFERENCES enquiries(id),
+  direction TEXT NOT NULL CHECK (direction IN ('IN','OUT','NOTE','SYSTEM')),
+  channel TEXT,
+  body TEXT NOT NULL,
+  user_id INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS ix_enqmsg ON enquiry_messages(enquiry_id);
 `;
+
+/** Additive column migrations for databases created by earlier releases. */
+const COLUMNS = [
+  ['shipments', 'pickup_date', 'TEXT'],
+  ['shipments', 'pickup_started_at', 'TEXT'],
+  ['shipments', 'pickup_missed_reason', 'TEXT'],
+  ['shipments', 'enquiry_id', 'INTEGER'],
+  ['quotations', 'enquiry_id', 'INTEGER'],
+];
 
 export function openDb(file = ':memory:') {
   const raw = new DatabaseSync(file);
   raw.exec('PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
   if (file !== ':memory:') raw.exec('PRAGMA journal_mode = WAL;');
   raw.exec(SCHEMA);
+  for (const [table, col, type] of COLUMNS) {
+    const has = raw.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === col);
+    if (!has) raw.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
+  }
 
   const cache = new Map();
   const prep = (sql) => {

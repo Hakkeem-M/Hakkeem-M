@@ -1,5 +1,6 @@
 // Driver mobile app API: run sheet, pickup with on-the-spot billing, POD delivery with COD, wallet.
 import { Router } from 'express';
+import { startPickup, missPickup, MISSED_REASONS } from '../lib/pickups.js';
 import { z } from 'zod';
 import { audit } from '../db.js';
 import { settingsFor, packingMap } from '../lib/entity.js';
@@ -136,7 +137,7 @@ r.post('/shipments/:id/pickup', validate(z.object({
     if (Object.keys(changes).length && !s.invoice_id) s = repriceShipment(req.db, s, changes);
     let invoice = null;
     if (s.payment_mode === 'CASH') invoice = billNow(req, s, b.payment);
-    setStatus(req.db, s.id, 'PICKED_UP', { route_seq: null });
+    setStatus(req.db, s.id, 'PICKED_UP', { route_seq: null, pickup_started_at: null, pickup_missed_reason: null });
     geofence(req, s, { lat: b.lat, lng: b.lng }, { lat: s.pickup_lat, lng: s.pickup_lng }, 'pickup');
     addEvent(req.db, s.id, 'PICKED_UP', { location: s.origin_city, note: b.note || 'Picked up by courier', userId: req.user.id, lat: b.lat, lng: b.lng });
     audit(req.db, req, 'driver.pickup', 'shipment', s.awb);
@@ -177,6 +178,24 @@ r.post('/shipments/:id/deliver', validate(z.object({
     return shipmentDetail(req.db, s.id);
   });
   res.json(out);
+});
+
+// Collection status from the driver app: on the way, or could not collect (back to dispatch).
+r.post('/shipments/:id/start', (req, res) => {
+  const id = idParam(req);
+  req.db.tx(() => { const s = ownShipment(req, id); startPickup(req.db, req, s); audit(req.db, req, 'driver.pickup_start', 'shipment', s.awb); });
+  res.json(shipmentDetail(req.db, id));
+});
+r.get('/pickup-missed-reasons', (_req, res) => res.json(MISSED_REASONS));
+r.post('/shipments/:id/pickup-missed', validate(z.object({ reason: z.string().max(60), note: z.string().trim().max(300).optional(), ...geo })), (req, res) => {
+  const id = idParam(req);
+  req.db.tx(() => {
+    const s = ownShipment(req, id);
+    if (s.status !== 'PICKUP_ASSIGNED') throw conflict(`Shipment is ${s.status}`);
+    missPickup(req.db, req, s, req.body.reason, req.body.note);
+    audit(req.db, req, 'driver.pickup_missed', 'shipment', s.awb, { reason: req.body.reason });
+  });
+  res.json({ ok: true });
 });
 
 export const FAIL_REASONS = ['Consignee not available', 'Wrong / incomplete address', 'Consignee refused', 'COD not ready', 'Rescheduled by consignee', 'Business closed', 'Other'];

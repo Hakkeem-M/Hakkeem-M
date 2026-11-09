@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useForm, ErrorBox } from './ui.jsx';
 import { REGIONS, setCurrency } from './format.js';
-import Logo, { LoginArt } from './Logo.jsx';
+import Logo from './Logo.jsx';
 
 const Ctx = createContext(null);
 
@@ -69,21 +69,21 @@ export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup })
   const demoFor = typeof demo === 'function' ? demo(region) : demo;
   return (
     <div className="login">
-      <section className="hero">
-        <Logo size={40} invert caption="UAE · UK · KSA · INDIA" />
+      <section className="hero" aria-label="ABC Cargo and Courier">
+        <img className="glass" src="/brand/fluid-glass.svg" alt="" aria-hidden="true" />
+        <Logo size={46} invert stacked />
         <div>
-          <h2>Moving cargo.<br />Connecting regions.</h2>
-          <p>{subtitle}</p>
+          <h2>Moving cargo.<br />Connecting teams.</h2>
+          <span className="rule" aria-hidden="true" />
+          <p>{region === 'GROUP' ? 'UAE · UK · KSA · India' : `Your ${REGIONS[region]?.name} operations`}, in one workspace.</p>
         </div>
-        <LoginArt />
-        <div className="chips"><span>✈️ Air courier</span><span>📦 Air cargo</span><span>🚢 Sea cargo</span><span>🚚 Domestic</span></div>
+        <img className="skyline" src="/brand/london-skyline.svg" alt="" aria-hidden="true" />
       </section>
       <div className="panel">
-        <form className="card stack" onSubmit={submit}>
-          <div className="row nowrap">
-            <img src={`/icons/${accent || 'erp'}.svg`} alt="" width="44" height="44" style={{ borderRadius: 12 }} />
-            <div><h1>Welcome back</h1><div className="muted small">{title} — sign in to continue</div></div>
-          </div>
+        <form className="stack" onSubmit={submit}>
+          <p className="eyebrow">{region === 'GROUP' ? 'Group' : REGIONS[region]?.name} <span aria-hidden="true">·</span> {title.replace(/^ABC (Cargo )?/, '') || 'ERP'}</p>
+          <h1>Welcome back</h1>
+          <p className="intro">{subtitle}</p>
           <label className="field">Region<RegionPicker value={region} onChange={setRegion} allowGroup={allowGroup} /></label>
           <ErrorBox error={err} />
           <label className="field">Email<input {...bind('email')} type="email" autoComplete="username" required autoFocus /></label>
@@ -91,7 +91,9 @@ export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup })
           <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : `Sign in${region !== 'GROUP' ? ` — ${REGIONS[region]?.name}` : ' — Group'}`}</button>
           {demoFor && <div className="alert info small">Demo login: <b>{demoFor}</b> / <b>Demo@2026</b></div>}
           {footer}
+          <p className="access">Need access? Contact your IT administrator.</p>
         </form>
+        <footer>© 2026 ABC Cargo &amp; Courier<br /><small>Developed By Hakkeem M</small></footer>
       </div>
     </div>
   );

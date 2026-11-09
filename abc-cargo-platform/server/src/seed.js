@@ -403,6 +403,37 @@ export function seedDemo(db) {
     tk(c2, null, 'BILLING', 'MEDIUM', 'Query on fuel surcharge in statement', 3);
     tk(c1, created[20], 'COD', 'LOW', 'COD remittance schedule', 1);
 
+    seedEnquiries(db);
     return { drivers, customers: [c1, c2, c3, c4] };
   });
+}
+
+/** Fictional agent-inbox enquiries per region (phone numbers use reserved drama/test ranges). */
+function seedEnquiries(db) {
+  const regions = {
+    AE: { cc: '+97150000', city: 'Dubai', dest: ['IN', 'Kochi'] }, GB: { cc: '+4477009', city: 'London', dest: ['IN', 'Kochi'] },
+    SA: { cc: '+96650000', city: 'Riyadh', dest: ['PK', 'Karachi'] }, IN: { cc: '+91980000', city: 'Kochi', dest: ['AE', 'Dubai'] },
+  };
+  const rows = [
+    ['PHONE', 'GENERAL', 'NEW', 'Asking for opening hours and parcel drop-off points', 3],
+    ['WHATSAPP', 'QUOTE', 'NEW', 'Price for 3 boxes, about 45 kg, door to door?', 1],
+    ['EMAIL', 'TRACKING', 'NEW', 'Where is my shipment? Booked last week', 0.2],
+    ['INSTAGRAM', 'GENERAL', 'LOST', 'Wanted same-day international — not available', 30],
+    ['WEBSITE', 'COMPLAINT', 'CLOSED', 'Driver arrived late — resolved with apology', 48],
+  ];
+  for (const [ent, r] of Object.entries(regions)) {
+    const owner = db.get("SELECT id FROM users WHERE entity_code = ? AND role = 'SALES' LIMIT 1", ent)?.id ?? null;
+    rows.forEach(([channel, type, status, text, hoursAgo], i) => {
+      const ref = `ENQ-${ent}-${String(nextSeq(db, `enquiry_${ent}`)).padStart(6, '0')}`;
+      const mobile = `${r.cc}${String(310 + i).padStart(3, '0')}`;
+      const at = `datetime('now', '-${Math.round(hoursAgo * 60)} minutes')`;
+      const id = Number(db.run(
+        `INSERT INTO enquiries (ref, entity_code, channel, lead_type, status, customer_name, mobile, whatsapp, email, country, city,
+           dest_country, dest_city, description, lost_reason, owner_id, created_at, updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, ${at}, ${at})`,
+        ref, ent, channel, type, status, `Demo Enquirer ${ent} ${i + 1}`, mobile, mobile, `enquirer${i + 1}.${ent.toLowerCase()}@example.invalid`,
+        ent, r.city, r.dest[0], r.dest[1], text, status === 'LOST' ? 'Service not offered' : null, owner).lastInsertRowid);
+      db.run(`INSERT INTO enquiry_messages (enquiry_id, direction, channel, body, created_at) VALUES (?, 'IN', ?, ?, ${at})`, id, channel, text);
+    });
+  }
 }

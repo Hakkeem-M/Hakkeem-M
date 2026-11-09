@@ -18,10 +18,15 @@ import { Invoices, InvoiceDetail, CashCod } from './pages/Finance.jsx';
 import { Pipeline, LeadDetail, Tickets, TicketDetail, Customer360, CrmTasks } from './pages/Crm.jsx';
 import { Customers, Users, Rates, Settings, Audit, Regions } from './pages/Admin.jsx';
 import { IntlOverview, Manifests, ManifestDetail, Countries } from './pages/International.jsx';
+import { AgentInbox, EnquiryPipeline, PickupsBoard } from './pages/Inbox.jsx';
 
 
 const NAV = [
   { to: '/', label: 'Dashboard', ic: '📊', roles: '*' },
+  { section: 'Customer support' },
+  { to: '/inbox', label: 'Agent inbox', ic: '📥', roles: ['ADMIN', 'OPS', 'SALES', 'FINANCE'] },
+  { to: '/inbox/pipeline', label: 'Enquiry pipeline', ic: '🧭', roles: ['ADMIN', 'OPS', 'SALES', 'FINANCE'] },
+  { section: 'Bookings' },
   { to: '/shipments', label: 'Shipments & bookings', ic: '📦', roles: '*' },
   { to: '/quotations', label: 'Quotations', ic: '💬', roles: ['ADMIN', 'OPS', 'SALES', 'FINANCE'] },
   { section: 'International' },
@@ -29,6 +34,7 @@ const NAV = [
   { to: '/intl/manifests', label: 'Air & sea manifests', ic: '✈️', roles: '*' },
   { to: '/intl/countries', label: 'Countries & duties', ic: '🌍', roles: '*' },
   { section: 'Domestic & logistics' },
+  { to: '/pickups', label: 'Pickups & deliveries', ic: '📋', roles: ['ADMIN', 'OPS'] },
   { to: '/dispatch', label: 'Pickup routing & GPS', ic: '🗺️', roles: ['ADMIN', 'OPS'] },
   { to: '/warehouse', label: 'Hub / warehouse', ic: '🏭', roles: ['ADMIN', 'OPS', 'WAREHOUSE'] },
   { section: 'CRM' },
@@ -134,7 +140,7 @@ function Shell() {
           <div className="region"><RegionSwitch /></div>
           <nav>
             {nav.map((n) => n.section ? <div key={n.section} className="sec">{n.section}</div> : (
-              <NavLink key={n.to} to={n.to} end={['/', '/crm', '/intl'].includes(n.to)} title={n.label}><span aria-hidden="true">{n.ic}</span> <span className="lbl">{n.label}</span></NavLink>
+              <NavLink key={n.to} to={n.to} end={['/', '/crm', '/intl', '/inbox'].includes(n.to)} title={n.label}><span aria-hidden="true">{n.ic}</span> <span className="lbl">{n.label}</span></NavLink>
             ))}
           </nav>
           <div className="me">
@@ -157,6 +163,9 @@ function Shell() {
             <Route path="/intl/manifests" element={<Manifests />} />
             <Route path="/intl/manifests/:id" element={<ManifestDetail />} />
             <Route path="/intl/countries" element={<Countries />} />
+            <Route path="/inbox" element={<AgentInbox />} />
+            <Route path="/inbox/pipeline" element={<EnquiryPipeline />} />
+            <Route path="/pickups" element={<PickupsBoard />} />
             <Route path="/dispatch" element={<Dispatch />} />
             <Route path="/warehouse" element={<WarehousePage />} />
             <Route path="/invoices" element={<Invoices />} />

@@ -16,6 +16,7 @@ const WRITE = requireRole('ADMIN', 'OPS', 'SALES');
 const quoteBody = shipmentInput.extend({
   customer_id: z.coerce.number().int().positive().optional(),
   lead_id: z.coerce.number().int().positive().optional(),
+  enquiry_id: z.coerce.number().int().positive().optional(),
   contact_name: zText(120).optional(),
   contact_phone: zPhone.optional(),
   contact_email: z.preprocess((v) => (v === '' ? undefined : v), z.string().trim().email().max(160).optional()),
@@ -57,7 +58,9 @@ r.post('/', WRITE, validate(quoteBody), (req, res) => {
   if (b.customer_id) customer = inEntity(req, req.db.get('SELECT * FROM customers WHERE id = ?', b.customer_id), 'Customer');
   let lead = null;
   if (b.lead_id) lead = inEntity(req, req.db.get('SELECT * FROM leads WHERE id = ?', b.lead_id), 'Lead');
-  const entity = customer?.entity_code || lead?.entity_code || entityForWrite(req, b.entity_code);
+  let enquiry = null;
+  if (b.enquiry_id) enquiry = inEntity(req, req.db.get('SELECT * FROM enquiries WHERE id = ?', b.enquiry_id), 'Enquiry');
+  const entity = customer?.entity_code || lead?.entity_code || enquiry?.entity_code || entityForWrite(req, b.entity_code);
   const contactName = b.contact_name || customer?.name || lead?.contact_name || b.shipper_name;
   const items = b.items || [];
   const customsValue = items.reduce((a, i) => a + i.qty * i.unit_value, 0);
@@ -65,20 +68,25 @@ r.post('/', WRITE, validate(quoteBody), (req, res) => {
   const { settings, country, ...pricing } = priced;
   const number = `QT-${entity}-${String(nextSeq(req.db, 'quotation')).padStart(6, '0')}`;
   const payload = { ...b };
-  delete payload.valid_days; delete payload.notes;
+  delete payload.valid_days; delete payload.notes; delete payload.enquiry_id;
   const ins = req.db.run(
     `INSERT INTO quotations (number, entity_code, currency, customer_id, lead_id, contact_name, contact_phone, contact_email, service,
-       origin_city, dest_country, dest_city, payload, pricing, total, valid_until, notes, created_by)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+       origin_city, dest_country, dest_city, payload, pricing, total, valid_until, notes, created_by, enquiry_id)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
     number, entity, pricing.currency, customer?.id ?? null, lead?.id ?? null, contactName, b.contact_phone || customer?.phone || lead?.phone || b.shipper_phone,
     b.contact_email || customer?.email || lead?.email || null, b.service, b.origin_city, (b.dest_country || entity).toUpperCase(), b.dest_city,
     JSON.stringify(payload), JSON.stringify({ ...pricing, country: country?.name ?? null }), pricing.total_charge, addDays(today(), b.valid_days),
-    b.notes ?? null, req.user.id);
+    b.notes ?? null, req.user.id, enquiry?.id ?? null);
+  const qid = Number(ins.lastInsertRowid);
+  if (enquiry) {
+    req.db.run("UPDATE enquiries SET status = CASE WHEN status = 'NEW' THEN 'QUOTED' ELSE status END, quotation_id = ?, updated_at = datetime('now') WHERE id = ?", qid, enquiry.id);
+    req.db.run("INSERT INTO enquiry_messages (enquiry_id, direction, body, user_id) VALUES (?, 'SYSTEM', ?, ?)", enquiry.id, `Quotation ${number} created — ${pricing.currency} ${pricing.total_charge.toFixed(2)}`, req.user.id);
+  }
   audit(req.db, req, 'quotation.create', 'quotation', number, { total: pricing.total_charge, currency: pricing.currency });
   if (lead && ['NEW', 'CONTACTED', 'QUALIFIED'].includes(lead.stage)) {
     req.db.run("UPDATE leads SET stage = 'PROPOSAL', probability = 60, updated_at = datetime('now') WHERE id = ?", lead.id);
   }
-  res.status(201).json(quoteRow(req.db, Number(ins.lastInsertRowid)));
+  res.status(201).json(quoteRow(req.db, qid));
 });
 
 r.get('/:id', READ, (req, res, next) => {
@@ -120,6 +128,11 @@ r.post('/:id/convert', WRITE, validate(z.object({
     const s = createShipment(req.db, req, { ...q.payload, customer_id: customerId, quotation_id: q.id, save_receiver: true },
       { paymentMode: req.body.payment_mode });
     req.db.run("UPDATE quotations SET status = 'CONVERTED', shipment_id = ?, customer_id = ?, updated_at = datetime('now') WHERE id = ?", s.id, customerId, id);
+    if (q.enquiry_id) {
+      req.db.run("UPDATE shipments SET enquiry_id = ?, pickup_date = date('now') WHERE id = ?", q.enquiry_id, s.id);
+      req.db.run("UPDATE enquiries SET status = 'BOOKED', shipment_id = ?, customer_id = ?, updated_at = datetime('now') WHERE id = ?", s.id, customerId, q.enquiry_id);
+      req.db.run("INSERT INTO enquiry_messages (enquiry_id, direction, body, user_id) VALUES (?, 'SYSTEM', ?, ?)", q.enquiry_id, `Quotation accepted — booked as ${s.awb}`, req.user.id);
+    }
     audit(req.db, req, 'quotation.convert', 'quotation', q.number, { awb: s.awb });
     return { quotation: quoteRow(req.db, id), shipment: shipmentDetail(req.db, s.id) };
   });

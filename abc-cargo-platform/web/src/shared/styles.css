@@ -215,36 +215,47 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .modal .btn, .modal h2 { display: none; }
 }
 
-/* ---------- Brand logo ---------- */
+/* ---------- Brand logo (ABC circles) ---------- */
 .logo { display: inline-flex; align-items: center; gap: 10px; color: inherit; }
-.logo .circles { display: inline-flex; }
-.logo .circles span { width: var(--ls, 30px); height: var(--ls, 30px); border-radius: 50%; display: grid; place-items: center; background: #c8102e; color: #fff;
-  font-weight: 700; font-size: calc(var(--ls, 30px) * .52); border: 2px solid #fff; margin-left: calc(var(--ls, 30px) * -.14); box-shadow: 0 1px 3px rgba(0,0,0,.2); }
-.logo .circles span:first-child { margin-left: 0; }
-.logo.invert .circles span { background: #fff; color: #c8102e; border-color: rgba(255,255,255,.6); }
+.logo .circles { display: inline-flex; gap: calc(var(--ls, 30px) * .14); }
+.logo .circles span { width: var(--ls, 30px); height: var(--ls, 30px); border-radius: 50%; display: grid; place-items: center; background: #ef373b; color: #fff;
+  font-family: Georgia, "Times New Roman", serif; font-weight: 700; font-size: calc(var(--ls, 30px) * .66); line-height: 1; box-shadow: 0 2px 6px rgba(68,4,13,.25); }
+.logo.invert .circles span { background: #ff1f2c; }
 .logo .wm { display: flex; flex-direction: column; line-height: 1.05; }
-.logo .wm b { font-size: calc(var(--ls, 30px) * .46); letter-spacing: .06em; font-weight: 700; }
-.logo .wm small { font-size: calc(var(--ls, 30px) * .34); opacity: .8; letter-spacing: .04em; }
+.logo .wm b { font-size: calc(var(--ls, 30px) * .42); letter-spacing: .04em; font-weight: 700; }
+.logo .wm small { font-size: calc(var(--ls, 30px) * .32); opacity: .8; letter-spacing: .04em; margin-top: 2px; }
+.logo.stacked { flex-direction: column; align-items: center; gap: 6px; }
+.logo.stacked .wm { align-items: center; }
 
-/* ---------- Split-screen login ---------- */
-.login { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); background: var(--surface); }
-.login .hero { background: var(--top); color: #fff; padding: 40px 48px; display: flex; flex-direction: column; justify-content: space-between; gap: 24px; position: relative; overflow: hidden; }
-.login .hero h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); line-height: 1.15; margin: 0; font-weight: 700; color: #fff; }
-.login .hero p { opacity: .85; max-width: 440px; margin: 8px 0 0; }
-.login .hero .art { width: 100%; max-width: 560px; height: auto; align-self: center; }
-.login .hero .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-.login .hero .chips span { background: rgba(255,255,255,.14); border: 1px solid rgba(255,255,255,.22); padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-.login .panel { display: grid; place-items: center; padding: 32px 20px; background: var(--bg); }
-.login .panel form { width: min(440px, 100%); padding: 28px; }
-.login .panel h1 { font-size: 1.6rem; margin: 0; }
+/* ---------- Split-screen login (red glass + London skyline brand artwork) ---------- */
+.login { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 49fr) minmax(0, 51fr); background: #fff; }
+.login .hero { position: relative; overflow: hidden; isolation: isolate; background: #680b16; color: #fff; padding: clamp(36px, 7vh, 80px) 5.5vw 0; display: flex; flex-direction: column; gap: clamp(32px, 6vh, 72px); }
+.login .hero .glass { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: -2; }
+.login .hero .skyline { position: absolute; left: 0; bottom: 3%; width: 100%; height: auto; z-index: -1; pointer-events: none; }
+.login .hero h2 { font-size: clamp(2rem, 3.6vw, 3.6rem); line-height: 1.1; letter-spacing: -.04em; margin: 0; font-weight: 700; color: #fff; }
+.login .hero .rule { display: block; width: 80px; height: 4px; background: #ff1f2c; margin: 22px 0 18px; }
+.login .hero p { font-size: clamp(1rem, 1.6vw, 1.6rem); margin: 0; opacity: .95; }
+.login .panel { position: relative; display: grid; place-items: center; padding: 48px 7% 110px; background: radial-gradient(ellipse at center, #fff 0%, #fff 60%, #fbfcfe 100%); color: #050b24; }
+.login .panel form { width: min(480px, 100%); text-align: left; }
+.login .panel .eyebrow { color: #344a83; text-transform: uppercase; letter-spacing: .14em; font-size: 13px; font-weight: 500; text-align: center; margin: 0 0 14px; }
+.login .panel h1 { font-size: clamp(2.2rem, 3.6vw, 3.6rem); letter-spacing: -.05em; margin: 0; text-align: center; color: #050b24; }
+.login .panel .intro { color: #344a83; text-align: center; margin: 6px 0 10px; }
+.login .panel .access { border-top: 1px solid #b5bfd7; padding-top: 16px; color: #344a83; text-align: center; font-size: 13px; }
+.login .panel footer { position: absolute; bottom: 28px; left: 0; right: 0; text-align: center; color: #344a83; font-size: 13px; line-height: 1.5; }
+.login .panel label.field { color: #344a83; }
+.login .panel input { background: #fff; color: #050b24; border-color: #aab6d5; }
+.login .panel .seg { background: #f3f5fa; border-color: #d5dbea; }
+.login .panel .seg button { color: #344a83; }
+.login .panel .seg button.on { background: #fff; color: #050b24; }
 @media (max-width: 860px) {
   .login { grid-template-columns: 1fr; }
-  .login .hero { padding: 20px 16px; gap: 12px; }
-  .login .hero .art, .login .hero p, .login .hero .chips { display: none; }
-  .login .hero h2 { font-size: 1.2rem; }
-  .login .panel { padding: 16px; align-items: start; }
-  .login .panel form { padding: 20px; }
+  .login .hero { min-height: 320px; padding: 28px 24px 0; gap: 24px; }
+  .login .hero h2 { font-size: clamp(1.7rem, 7vw, 2.6rem); }
+  .login .hero .rule { width: 56px; height: 3px; margin: 14px 0 10px; }
+  .login .hero .skyline { width: 70%; left: auto; right: -4%; bottom: -6%; opacity: .45; }
+  .login .panel { padding: 32px 20px 96px; align-items: start; }
 }
+@media (prefers-reduced-motion: reduce) { .login .hero .skyline { animation: none; } }
 
 /* ---------- Greeting banner ---------- */
 .greet { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; padding: 18px 20px;

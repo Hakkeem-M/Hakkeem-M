@@ -36,6 +36,8 @@ One Node.js API serves four applications:
 - Driver GPS pings (batched, offline-buffered); geofence check flags pickups/deliveries confirmed > 0.5 km from the pin
 - Warehouse inventory by bin, ageing, transfers, returns
 
+**Agent inbox & collections** — one inbox for phone (PABX), WhatsApp, email, website, social, walk-in and referral enquiries; lead form with duplicate check; lead type decides the next step (collection → booked straight away and auto-assigned to the nearest free driver; price only → direct quotation); enquiry pipeline; pickups & deliveries board (scheduled / en route / completed / missed with start, collected, failed, postpone, cancel). Live channel connectors post to `POST /api/inbox/incoming`.
+
 **CRM** — leads & kanban pipeline (weighted value, win rate), activities & follow-ups, lead → customer conversion, contacts, Customer 360 (revenue, AR, credit available, tickets), support tickets with SLA, internal notes hidden from customers.
 
 **Finance** — tax invoices (cash at pickup, prepaid, monthly account billing runs), payments, receivables & overdue, driver cash settlement (must match counted cash), COD remittance to shippers, rate cards, settings.
@@ -77,7 +79,7 @@ Demo logins (fictional data, password `Demo@2026`, domain `@abccargo.demo`) — 
 ```bash
 npm test
 ```
-20 API tests (7 for regions: login rules, data isolation, multi-box sea pricing, regional VAT/GST, quotations, receivers & KYC, sea manifests) plus: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
+24 API tests (7 for regions: login rules, data isolation, multi-box sea pricing, regional VAT/GST, quotations, receivers & KYC, sea manifests) plus: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
 
 ## Deploy (production)
 ```bash

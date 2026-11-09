@@ -60,3 +60,45 @@
 }
 .dispatch-grid { grid-template-columns: minmax(0, 1.6fr) minmax(320px, 1fr); }
 @media (max-width: 1100px) { .dispatch-grid { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Page titles (UK ERP style: red bar + caps) ---------- */
+h1.ttl { border-left: 4px solid var(--brand); padding-left: 10px; text-transform: uppercase; letter-spacing: .04em; font-size: 1.15rem; margin: 0 0 2px; }
+.sec-t { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--text-2); margin-bottom: 8px; }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 6px 12px; font: inherit; font-size: 13px; cursor: pointer; color: var(--text); }
+.chip:hover { border-color: var(--brand); }
+.chip.on { background: var(--text); border-color: var(--text); color: var(--surface); }
+.seg.sm button { padding: 6px 8px; font-size: 12.5px; }
+.avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--text); color: var(--surface); display: grid; place-items: center; font-weight: 700; flex: none; }
+.kpi.solid { background: var(--brand); border-color: var(--brand); color: #fff; }
+.kpi.solid .l, .kpi.solid .small { color: #fff; opacity: .9; }
+.kanban.k4 { grid-template-columns: repeat(4, minmax(220px, 1fr)); }
+.kanban .lead { cursor: default; }
+.steps .step { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.steps .step .n { width: 24px; height: 24px; border-radius: 6px; background: var(--brand); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; flex: none; }
+
+/* ---------- Agent inbox ---------- */
+.inbox { display: grid; grid-template-columns: 310px minmax(0, 1fr) 300px; padding: 0; overflow: hidden; height: calc(100vh - 170px); min-height: 520px; }
+.ib-list { border-right: 1px solid var(--border); overflow-y: auto; display: flex; flex-direction: column; }
+.ib-search { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.ib-item { text-align: left; border: 0; border-bottom: 1px solid var(--border); border-left: 3px solid transparent; background: none; padding: 10px 12px; font: inherit; color: inherit; cursor: pointer; display: block; width: 100%; }
+.ib-item:hover { background: var(--surface-2); }
+.ib-item.on { background: var(--brand-soft); border-left-color: var(--brand); }
+.ib-thread { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.ib-head { display: flex; justify-content: space-between; gap: 10px; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.ib-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--surface-2); }
+.msg { max-width: 78%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface); }
+.msg.in { align-self: flex-start; }
+.msg.out { align-self: flex-end; background: var(--brand-soft); border-color: transparent; }
+.msg.note { align-self: flex-end; background: var(--warn-bg); border-color: transparent; }
+.msg.system { align-self: center; background: none; border: 0; padding: 2px; font-size: 12px; color: var(--text-2); text-align: center; max-width: 90%; }
+.ib-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 10px 16px; border-top: 1px solid var(--border); }
+.ib-reply { display: flex; gap: 8px; align-items: center; padding: 10px 16px 14px; }
+.ib-reply input:not([type=checkbox]) { flex: 1; }
+.ib-side { border-left: 1px solid var(--border); overflow-y: auto; }
+.ib-sec { padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; flex-direction: column; gap: 2px; }
+.ib-sec .btn.ghost { justify-content: flex-start; text-align: left; white-space: normal; }
+@media (max-width: 1200px) { .inbox { grid-template-columns: 280px minmax(0, 1fr); } .ib-side { display: none; } }
+@media (max-width: 760px) { .inbox { grid-template-columns: 1fr; height: auto; } .ib-list { max-height: 300px; border-right: 0; border-bottom: 1px solid var(--border); } .ib-msgs { max-height: 50vh; } }
+.lead-form .grid { gap: 10px; }

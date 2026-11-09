@@ -1,6 +1,6 @@
 // Quotations: create from a lead / customer / walk-in contact, send, accept, convert to a booking. Printable quote.
 import { useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, useMeta } from '../ctx.js';
 import { qs } from '../../shared/api.js';
 import { useLoad, useAction, Spinner, ErrorBox, Badge, Field, Empty, useForm } from '../../shared/ui.jsx';
@@ -38,18 +38,34 @@ export function Quotations() {
 }
 
 export function NewQuotation() {
+  const [sp] = useSearchParams();
+  const enquiryId = Number(sp.get('enquiry')) || null;
+  const enq = useLoad(() => (enquiryId ? api.get(`/api/inbox/${enquiryId}`) : Promise.resolve(null)), [enquiryId]);
+  if (enquiryId && !enq.data) return enq.error ? <ErrorBox error={enq.error} /> : <Spinner />;
+  return <NewQuotationForm enquiry={enq.data} key={enquiryId || 'new'} />;
+}
+
+function NewQuotationForm({ enquiry }) {
   const nav = useNavigate();
   const { user, region: working } = useSession();
-  const [region, setRegion] = useState(user.entity_code || working || 'AE');
+  const [region, setRegion] = useState(enquiry?.entity_code || user.entity_code || working || 'AE');
   const customers = useLoad(() => api.get('/api/admin/customers'), [region]);
   const leads = useLoad(() => api.get('/api/crm/leads').catch(() => []), []);
-  const [c, , bind] = useForm({ customer_id: '', lead_id: '', contact_name: '', contact_phone: '', contact_email: '', valid_days: 14, notes: '' });
+  const [c, , bind] = useForm({ customer_id: enquiry?.customer_id ? String(enquiry.customer_id) : '', lead_id: '', contact_name: enquiry?.customer_name || '',
+    contact_phone: enquiry?.mobile || '', contact_email: enquiry?.email || '', valid_days: 14, notes: '' });
+  const enqInitial = enquiry ? Object.fromEntries(Object.entries({
+    shipper_name: enquiry.customer_name, shipper_phone: enquiry.mobile,
+    shipper_address: [enquiry.address1, enquiry.address2, enquiry.address3, enquiry.postcode].filter(Boolean).join(', ') || undefined,
+    origin_city: enquiry.city || undefined, service: enquiry.service || undefined, dest_country: enquiry.dest_country || undefined,
+    dest_city: enquiry.dest_city || undefined, pieces: enquiry.pieces || undefined, weight: enquiry.weight_kg || undefined,
+    consignee_name: enquiry.receiver_name || undefined, consignee_phone: enquiry.receiver_phone || undefined, consignee_address: enquiry.receiver_address || undefined,
+  }).filter(([, x]) => x !== undefined)) : {};
   const [run, busy] = useAction();
   const cust = customers.data?.find((x) => String(x.id) === c.customer_id);
   const regionCustomers = (customers.data || []).filter((x) => x.entity_code === region);
   return (
     <>
-      <div className="page-head"><div><Link to="/quotations" className="small">‹ Quotations</Link><h1>New quotation</h1></div></div>
+      <div className="page-head"><div><Link to={enquiry ? `/inbox?id=${enquiry.id}` : '/quotations'} className="small">‹ {enquiry ? `Enquiry ${enquiry.ref}` : 'Quotations'}</Link><h1>New quotation{enquiry ? ` · ${enquiry.customer_name}` : ''}</h1></div></div>
       <div className="card stack">
         {!user.entity_code && <Field label="Region (origin)"><RegionPicker value={region} onChange={setRegion} /></Field>}
         <div className="grid g3">
@@ -66,12 +82,12 @@ export function NewQuotation() {
       </div>
       <ShipmentForm api={api} region={region} staff key={`${region}-${c.customer_id}`} submitLabel="Create quotation" busy={busy}
         receiversUrl={c.customer_id ? `/api/quotations/customers/${c.customer_id}/receivers` : undefined}
-        initial={cust ? { shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || undefined } : {}}
+        initial={{ ...(cust ? { shipper_name: cust.name, shipper_phone: cust.phone || '', shipper_address: cust.address || '', origin_city: cust.city || undefined } : {}), ...enqInitial }}
         onSubmit={async (body) => {
           const q = await run(() => api.post('/api/quotations', {
             ...body, entity_code: region, customer_id: c.customer_id ? Number(c.customer_id) : undefined, lead_id: c.lead_id ? Number(c.lead_id) : undefined,
             contact_name: c.contact_name || undefined, contact_phone: c.contact_phone || undefined, contact_email: c.contact_email || undefined,
-            valid_days: Number(c.valid_days) || 14, notes: c.notes || undefined,
+            valid_days: Number(c.valid_days) || 14, notes: c.notes || undefined, enquiry_id: enquiry?.id,
           }), 'Quotation created');
           nav(`/quotations/${q.id}`);
         }} />
