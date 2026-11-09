@@ -111,7 +111,7 @@ export function QuotationDetail() {
           {q.shipment_id && <Link className="btn primary" to={`/shipments/${q.shipment_id}`}>Open booking {q.awb}</Link>}
         </div></div>
       <div className="card" style={{ background: '#fff', color: '#000', maxWidth: 860 }}>
-        <div className="row between"><div><div style={{ fontSize: 20, fontWeight: 800, color: '#0b3d91' }}>{meta.company?.name}</div><div className="small">{meta.company?.address} · {meta.company?.phone}</div>
+        <div className="row between"><div><div style={{ fontSize: 20, fontWeight: 800, color: '#c8102e' }}>{meta.company?.name}</div><div className="small">{meta.company?.address} · {meta.company?.phone}</div>
           <div className="small">{meta.company?.tax_label}: {meta.company?.trn}</div></div>
           <div style={{ textAlign: 'right' }}><div style={{ fontSize: 18, fontWeight: 800 }}>QUOTATION</div><div>No. <b>{q.number}</b></div><div>Valid until {dOnly(q.valid_until)}</div></div></div>
         <hr />

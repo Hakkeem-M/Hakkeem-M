@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import { useForm, ErrorBox } from './ui.jsx';
 import { REGIONS, setCurrency } from './format.js';
+import Logo, { LoginArt } from './Logo.jsx';
 
 const Ctx = createContext(null);
 
@@ -67,20 +68,31 @@ export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup })
   };
   const demoFor = typeof demo === 'function' ? demo(region) : demo;
   return (
-    <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 16 }}>
-      <form className="card stack" style={{ width: 'min(460px, 100%)', padding: 24 }} onSubmit={submit}>
-        <div className="row nowrap">
-          <img src={`/icons/${accent || 'erp'}.svg`} alt="" width="44" height="44" style={{ borderRadius: 12 }} />
-          <div><h1 style={{ margin: 0 }}>{title}</h1><div className="muted small">{subtitle}</div></div>
+    <div className="login">
+      <section className="hero">
+        <Logo size={40} invert caption="UAE · UK · KSA · INDIA" />
+        <div>
+          <h2>Moving cargo.<br />Connecting regions.</h2>
+          <p>{subtitle}</p>
         </div>
-        <label className="field">Region<RegionPicker value={region} onChange={setRegion} allowGroup={allowGroup} /></label>
-        <ErrorBox error={err} />
-        <label className="field">Email<input {...bind('email')} type="email" autoComplete="username" required autoFocus /></label>
-        <label className="field">Password<input {...bind('password')} type="password" autoComplete="current-password" required /></label>
-        <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : `Sign in${region !== 'GROUP' ? ` — ${REGIONS[region]?.name}` : ' — Group'}`}</button>
-        {demoFor && <div className="alert info small">Demo login: <b>{demoFor}</b> / <b>Demo@2026</b></div>}
-        {footer}
-      </form>
+        <LoginArt />
+        <div className="chips"><span>✈️ Air courier</span><span>📦 Air cargo</span><span>🚢 Sea cargo</span><span>🚚 Domestic</span></div>
+      </section>
+      <div className="panel">
+        <form className="card stack" onSubmit={submit}>
+          <div className="row nowrap">
+            <img src={`/icons/${accent || 'erp'}.svg`} alt="" width="44" height="44" style={{ borderRadius: 12 }} />
+            <div><h1>Welcome back</h1><div className="muted small">{title} — sign in to continue</div></div>
+          </div>
+          <label className="field">Region<RegionPicker value={region} onChange={setRegion} allowGroup={allowGroup} /></label>
+          <ErrorBox error={err} />
+          <label className="field">Email<input {...bind('email')} type="email" autoComplete="username" required autoFocus /></label>
+          <label className="field">Password<input {...bind('password')} type="password" autoComplete="current-password" required /></label>
+          <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : `Sign in${region !== 'GROUP' ? ` — ${REGIONS[region]?.name}` : ' — Group'}`}</button>
+          {demoFor && <div className="alert info small">Demo login: <b>{demoFor}</b> / <b>Demo@2026</b></div>}
+          {footer}
+        </form>
+      </div>
     </div>
   );
 }

@@ -18,7 +18,7 @@ registerSW();
 function Top({ title, back, right }) {
   const nav = useNavigate();
   return (
-    <header className="m-top" style={{ background: 'linear-gradient(135deg, #0b3d91, #1456c4)' }}>
+    <header className="m-top">
       {back && <button className="btn sm" onClick={() => nav(-1)} aria-label="Back">‹</button>}
       <h1 className="spacer">{title}</h1>{right}
     </header>

@@ -1,11 +1,13 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { HashRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { HashRouter, Routes, Route, NavLink, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
 import '../shared/styles.css';
 import './erp.css';
 import { api, MetaCtx } from './ctx.js';
 import { SessionProvider, useSession, LoginForm, demoAccount } from '../shared/session.jsx';
 import { REGIONS } from '../shared/format.js';
+import Logo from '../shared/Logo.jsx';
 import { Quotations, QuotationDetail, NewQuotation } from './pages/Quotations.jsx';
 import { ToastProvider, Spinner, useLoad } from '../shared/ui.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -60,9 +62,57 @@ function RegionSwitch() {
   );
 }
 
+const store = {
+  get(k, d) { try { const v = sessionStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } },
+  set(k, v) { try { sessionStorage.setItem(k, JSON.stringify(v)); } catch { /* storage unavailable */ } },
+};
+/** Tab title for a route: nav label, or "<nav label> · <id>" for detail pages. */
+function tabLabel(path) {
+  const exact = NAV.find((n) => n.to === path);
+  if (exact) return `${exact.ic} ${exact.label}`;
+  const base = NAV.filter((n) => n.to && n.to !== '/' && path.startsWith(`${n.to}/`)).sort((a, b) => b.to.length - a.to.length)[0];
+  const last = path.split('/').filter(Boolean).pop();
+  if (!base) return path;
+  return `${base.ic} ${last === 'new' ? `New · ${base.label}` : `${base.label} · ${last}`}`;
+}
+/** Multi-tab workspace: every page opened stays as a tab until closed (per browser session). */
+function TabBar() {
+  const loc = useLocation();
+  const nav = useNavigate();
+  const [tabs, setTabs] = useState(() => store.get('erp.tabs', ['/']));
+  const path = loc.pathname;
+  useEffect(() => {
+    setTabs((t) => {
+      const rest = (t.includes(path) ? t : [...t, path]).filter((x) => x !== '/').slice(-11);
+      const next = ['/', ...rest];
+      store.set('erp.tabs', next);
+      return next;
+    });
+    requestAnimationFrame(() => { try { document.querySelector('.tabbar .t.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch { /* old browsers */ } });
+  }, [path]);
+  const close = (p) => {
+    const i = tabs.indexOf(p);
+    const next = tabs.filter((x) => x !== p);
+    setTabs(next); store.set('erp.tabs', next);
+    if (p === path) nav(next[Math.max(0, i - 1)] || '/');
+  };
+  return (
+    <div className="tabbar no-print" role="tablist" aria-label="Open pages">
+      {tabs.map((p) => (
+        <span key={p} className={`t ${p === path ? 'on' : ''}`} role="tab" aria-selected={p === path}>
+          <Link to={p} title={tabLabel(p)}>{tabLabel(p)}</Link>
+          {p !== '/' && <button type="button" onClick={() => close(p)} aria-label={`Close ${tabLabel(p)}`}>×</button>}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function Shell() {
   const { user, logout, region } = useSession();
   const meta = useLoad(() => api.get(`/api/public/meta?entity=${region || 'AE'}`), [region]);
+  const [mini, setMini] = useState(() => store.get('erp.mini', false));
+  const toggleMini = () => setMini((m) => { store.set('erp.mini', !m); return !m; });
   if (user === undefined) return <Spinner />;
   if (!user) return <LoginForm title="ABC Cargo ERP" subtitle="UAE · UK · KSA · India — international cargo, courier & CRM" demo={(r) => demoAccount('admin', r)} accent="erp" allowGroup />;
   const nav = [];
@@ -75,20 +125,25 @@ function Shell() {
   }
   return (
     <MetaCtx.Provider value={meta.data || {}}>
-      <div className="erp">
+      <div className={`erp ${mini ? 'mini' : ''}`}>
         <aside className="side">
-          <div className="brand"><img src="/icons/erp.svg" alt="" width="32" height="32" /> <div><b>ABC Cargo</b><div className="tiny">ERP · {user.role}</div></div></div>
-          <div style={{ padding: '8px 12px', borderBottom: '1px solid var(--border)' }}><RegionSwitch /></div>
+          <div className="brand">
+            <Logo size={26} caption={`ERP · ${user.role}`} />
+            <button className="burger" onClick={toggleMini} aria-label={mini ? 'Expand menu' : 'Collapse menu'} aria-expanded={!mini}>☰</button>
+          </div>
+          <div className="region"><RegionSwitch /></div>
           <nav>
             {nav.map((n) => n.section ? <div key={n.section} className="sec">{n.section}</div> : (
-              <NavLink key={n.to} to={n.to} end={['/', '/crm', '/intl'].includes(n.to)}><span aria-hidden="true">{n.ic}</span> {n.label}</NavLink>
+              <NavLink key={n.to} to={n.to} end={['/', '/crm', '/intl'].includes(n.to)} title={n.label}><span aria-hidden="true">{n.ic}</span> <span className="lbl">{n.label}</span></NavLink>
             ))}
           </nav>
           <div className="me">
-            <div className="small"><b>{user.name}</b><div className="tiny muted">{user.email}</div></div>
-            <button className="btn sm" onClick={logout}>Sign out</button>
+            <div className="small who"><b>{user.name}</b><div className="tiny muted">{user.email}</div></div>
+            <button className="btn sm" onClick={logout} title="Sign out">{mini ? '⏻' : 'Sign out'}</button>
           </div>
         </aside>
+        <div className="main-col">
+        <TabBar />
         <main className="content">
           <Routes>
             <Route path="/" element={<Dashboard />} />
@@ -121,6 +176,7 @@ function Shell() {
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>
         </main>
+        </div>
       </div>
     </MetaCtx.Provider>
   );

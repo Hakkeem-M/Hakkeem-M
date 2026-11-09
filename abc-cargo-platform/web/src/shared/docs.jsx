@@ -35,7 +35,7 @@ export function InvoiceDoc({ inv, company, receipt }) {
     <div style={{ background: '#fff', color: '#000', padding: 20, borderRadius: 8, maxWidth: 820, fontSize: 13 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
         <div>
-          <div style={{ fontSize: 20, fontWeight: 800, color: '#0b3d91' }}>{company?.name || 'ABC Cargo & Courier'}</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#c8102e' }}>{company?.name || 'ABC Cargo & Courier'}</div>
           <div>{company?.address}</div><div>{company?.phone} · {company?.email}</div>
           <div>{company?.tax_label || 'TRN'}: <b>{company?.trn}</b></div>
         </div>

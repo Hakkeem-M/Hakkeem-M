@@ -42,6 +42,8 @@ One Node.js API serves four applications:
 
 **Security** — JWT with per-user token version (deactivate / role change / password change revokes sessions), RBAC on every route, customer data isolation, rate-limited login & public endpoints, Helmet CSP, Permissions-Policy (camera & geolocation self only), zod validation, parameterised SQL, audit log, demo payments disabled in production.
 
+**UI** — ABC crimson brand theme (light & dark), Poppins font, split-screen login, collapsible sidebar, multi-tab ERP workspace, coloured KPI dashboard with daily greeting.
+
 ## Run locally
 
 ```bash

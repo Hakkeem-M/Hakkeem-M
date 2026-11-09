@@ -2,6 +2,31 @@ import { Link } from 'react-router-dom';
 import { api } from '../ctx.js';
 import { useLoad, Spinner, ErrorBox, Stat, Badge } from '../../shared/ui.jsx';
 import { aed, money, num, ago, SERVICES, REGIONS } from '../../shared/format.js';
+import { useSession } from '../../shared/session.jsx';
+
+const LINES = [
+  'Every parcel is a promise — keep it on time.',
+  'Great logistics is invisible: it simply arrives.',
+  'Plan the route, then trust the team to run it.',
+  'Small checks at the hub save big delays at customs.',
+  'One region, one team, one standard of service.',
+  'Clear paperwork is the fastest way through any border.',
+  'Customers remember the delivery, not the distance.',
+];
+function Greeting() {
+  const { user } = useSession();
+  const now = new Date();
+  const h = now.getHours();
+  const part = h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
+  const day = Math.floor(now.getTime() / 86400000);
+  return (
+    <div className="card greet">
+      <div><h1>{part}, {user?.name?.split(' ')[0] || 'team'} 👋</h1>
+        <div className="muted small">{now.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</div></div>
+      <div className="quote small">💡 {LINES[day % LINES.length]}</div>
+    </div>
+  );
+}
 
 function Bars({ days, k, alt, fmt = num }) {
   const max = Math.max(1, ...days.map((d) => d[k]));
@@ -26,7 +51,8 @@ export default function Dashboard() {
   const amt = (x) => (all ? '— (multi-currency)' : money(x, data.currency));
   return (
     <>
-      <div className="page-head"><h1>{all ? '🌐 Group dashboard — all regions' : `${REGIONS[data.entity]?.flag} ${REGIONS[data.entity]?.name} dashboard`}</h1><span className="muted small">Auto-refreshes every minute{all ? ' · amounts per region currency below' : ''}</span></div>
+      <Greeting />
+      <div className="page-head"><h1 style={{ fontSize: '1.15rem' }}>{all ? '🌐 Group dashboard — all regions' : `${REGIONS[data.entity]?.flag} ${REGIONS[data.entity]?.name} dashboard`}</h1><span className="muted small">Auto-refreshes every minute{all ? ' · amounts per region currency below' : ''}</span></div>
       <div className="grid g4">
         {data.regions.map((r) => (
           <div key={r.code} className="card kpi"><span className="l">{REGIONS[r.code]?.flag} {REGIONS[r.code]?.name}</span>

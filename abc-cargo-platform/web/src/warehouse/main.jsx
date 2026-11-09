@@ -100,7 +100,7 @@ function Scanner() {
 
   return (
     <div className={`m-app ${flash}`}>
-      <header className="m-top" style={{ background: '#1f2937' }}>
+      <header className="m-top dark">
         <h1 className="spacer">Hub Scanner</h1>
         <span className="badge" style={{ background: online ? 'var(--ok)' : 'var(--bad)', color: '#fff', borderColor: 'transparent' }}>{online ? 'Online' : 'Offline'}</span>
         {queue.length > 0 && <button className="btn sm" onClick={flush}>Sync {queue.length}</button>}
