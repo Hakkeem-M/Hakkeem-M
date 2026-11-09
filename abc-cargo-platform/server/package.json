@@ -1,0 +1,25 @@
+{
+  "name": "abc-cargo-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "ABC Cargo & Courier ERP API (shipments, warehouse scans, driver billing, invoicing, customer portal)",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning src/index.js",
+    "dev": "node --disable-warning=ExperimentalWarning --watch src/index.js",
+    "seed": "node --disable-warning=ExperimentalWarning src/seed-cli.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/*.test.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "express": "^5.1.0",
+    "express-rate-limit": "^7.5.0",
+    "helmet": "^8.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "supertest": "^7.1.0"
+  }
+}
