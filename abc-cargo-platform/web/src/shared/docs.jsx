@@ -9,6 +9,12 @@ export function ShippingLabel({ s, company }) {
         <b style={{ fontSize: 16 }}>{company?.name || 'ABC Cargo & Courier'}</b>
         <b style={{ fontSize: 18 }}>{SERVICES[s.service] || s.service}</b>
       </div>
+      {s.dest_country && s.dest_country !== 'AE' && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #000', padding: '4px 0' }}>
+          <b style={{ fontSize: 34, letterSpacing: 2 }}>{s.dest_airport || s.dest_country}</b>
+          <div style={{ textAlign: 'right', fontSize: 12 }}>DXB → {s.dest_airport}<br />{s.product} · {s.incoterm}{s.dangerous_goods ? ' · ⚠ DG' : ''}<br />Value {s.customs_value} {s.currency}</div>
+        </div>
+      )}
       <div style={{ textAlign: 'center', padding: '6px 0' }}><Barcode value={s.awb} height={70} width={2.2} /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, borderTop: '1px solid #000', paddingTop: 6 }}>
         <div><div style={{ fontSize: 10, fontWeight: 700 }}>FROM</div>{s.shipper_name}<br />{s.shipper_address}<br />{s.origin_city}<br />{s.shipper_phone}</div>
@@ -70,6 +76,35 @@ export function InvoiceDoc({ inv, company, receipt }) {
         <div style={{ marginTop: 8 }} className="small">Payments: {inv.payments.map((p) => `${p.method} ${aed(p.amount)} (${dt(p.created_at)})`).join(' · ')}</div>
       )}
       <div style={{ marginTop: 18, fontSize: 11, color: '#555' }}>Amounts in UAE Dirham (AED). Export shipments are zero-rated. This is a computer-generated document.</div>
+    </div>
+  );
+}
+
+/** Commercial / proforma invoice for customs (international exports). */
+export function CommercialInvoice({ s, company }) {
+  const items = s.items || [];
+  const total = items.reduce((a, i) => a + i.qty * i.unit_value, 0);
+  const cell = { border: '1px solid #999', padding: '4px 6px' };
+  return (
+    <div style={{ background: '#fff', color: '#000', padding: 20, borderRadius: 8, maxWidth: 860, fontSize: 12 }}>
+      <div style={{ textAlign: 'center', fontSize: 18, fontWeight: 800 }}>COMMERCIAL INVOICE</div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', margin: '8px 0' }}>
+        <div>AWB: <b>{s.awb}</b><br />Date: {dOnly(s.created_at)}<br />Reference: {s.reference || '—'}</div>
+        <div style={{ textAlign: 'right' }}>Carrier: {company?.name || 'ABC Cargo & Courier'}<br />Service: {SERVICES[s.service]}<br />Incoterm: <b>{s.incoterm}</b> · Reason: {s.export_reason}</div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div style={{ ...cell }}><b>EXPORTER / SHIPPER</b><br />{s.shipper_name}<br />{s.shipper_address}<br />{s.origin_city}, United Arab Emirates<br />Tel {s.shipper_phone}</div>
+        <div style={{ ...cell }}><b>CONSIGNEE / IMPORTER</b><br />{s.consignee_name}<br />{s.consignee_address}<br />{s.dest_city} {s.consignee_postcode} · {s.dest_country}<br />Tel {s.consignee_phone}{s.consignee_tax_id && <><br />Tax ID {s.consignee_tax_id}</>}</div>
+      </div>
+      <table style={{ marginTop: 10, borderCollapse: 'collapse', width: '100%' }}>
+        <thead><tr>{['#', 'Description of goods', 'HS code', 'Origin', 'Qty', `Unit value (${s.currency})`, `Total (${s.currency})`].map((h) => <th key={h} style={{ ...cell, background: '#eef2f8', color: '#000' }}>{h}</th>)}</tr></thead>
+        <tbody>{items.map((i, n) => <tr key={i.id || n}><td style={cell}>{n + 1}</td><td style={cell}>{i.description}</td><td style={cell}>{i.hs_code || '—'}</td><td style={cell}>{i.origin_country}</td>
+          <td style={{ ...cell, textAlign: 'right' }}>{i.qty}</td><td style={{ ...cell, textAlign: 'right' }}>{Number(i.unit_value).toFixed(2)}</td><td style={{ ...cell, textAlign: 'right' }}>{(i.qty * i.unit_value).toFixed(2)}</td></tr>)}</tbody>
+        <tfoot><tr><td colSpan={6} style={{ ...cell, textAlign: 'right' }}><b>Total declared value</b></td><td style={{ ...cell, textAlign: 'right' }}><b>{total.toFixed(2)} {s.currency}</b></td></tr></tfoot>
+      </table>
+      <div style={{ marginTop: 8 }}>Pieces: {s.pieces} · Gross weight: {s.weight} kg · Chargeable: {s.chargeable_weight} kg{s.length ? ` · Dims ${s.length}×${s.width}×${s.height} cm` : ''}{s.dangerous_goods ? ' · Contains dangerous goods (DG declaration attached)' : ''}</div>
+      <div style={{ marginTop: 18 }}>I declare that the information on this invoice is true and correct and that the contents are as stated.</div>
+      <div style={{ marginTop: 28, display: 'flex', justifyContent: 'space-between' }}><span>Signature: ____________________</span><span>Name: {s.shipper_name}</span><span>Date: {dOnly(s.created_at)}</span></div>
     </div>
   );
 }

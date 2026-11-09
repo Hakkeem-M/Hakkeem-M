@@ -33,7 +33,7 @@ export function Customers() {
 
 function CustomerModal({ c, onClose, onDone }) {
   const staff = useLoad(() => api.get('/api/admin/staff'), []);
-  const [v, setV, bind] = useForm({ name: '', type: 'ACCOUNT', phone: '', email: '', address: '', city: 'Dubai', trn: '', industry: '', credit_limit: 0, payment_terms_days: 30, account_manager_id: '', active: true, ...c, active: c.active === undefined ? true : !!c.active });
+  const [v, setV, bind] = useForm({ name: '', type: 'ACCOUNT', phone: '', email: '', address: '', city: 'Dubai', trn: '', industry: '', credit_limit: 0, payment_terms_days: 30, account_manager_id: '', ...c, active: c.active === undefined ? true : !!c.active });
   const [run, busy] = useAction();
   const save = () => {
     const body = { ...v };

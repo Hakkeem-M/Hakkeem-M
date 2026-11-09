@@ -1,0 +1,15 @@
+services:
+  abc-cargo:
+    build: .
+    ports: ["4000:4000"]
+    environment:
+      NODE_ENV: production
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET (32+ chars)}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:?set first admin email}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?set first admin password}
+      TRUST_PROXY: "1"
+      PAYMENTS_DEMO: "0"
+    volumes: ["abc-data:/data"]
+    restart: unless-stopped
+volumes:
+  abc-data:

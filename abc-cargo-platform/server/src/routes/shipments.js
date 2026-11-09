@@ -24,6 +24,7 @@ r.get('/', (req, res) => {
   if (q.driver_id) { where.push('s.driver_id = ?'); args.push(Number(q.driver_id)); }
   if (q.branch_id) { where.push('s.branch_id = ?'); args.push(Number(q.branch_id)); }
   if (q.unassigned === '1') where.push('s.driver_id IS NULL');
+  if (q.type === 'INTERNATIONAL' || q.type === 'DOMESTIC') { where.push('s.shipment_type = ?'); args.push(q.type); }
   if (q.from) { where.push('date(s.created_at) >= date(?)'); args.push(String(q.from)); }
   if (q.to) { where.push('date(s.created_at) <= date(?)'); args.push(String(q.to)); }
   if (q.q) {
@@ -38,6 +39,7 @@ r.get('/', (req, res) => {
     `SELECT s.id, s.awb, s.status, s.service, s.zone, s.payment_mode, s.origin_city, s.dest_city, s.dest_country,
             s.shipper_name, s.consignee_name, s.consignee_phone, s.pieces, s.chargeable_weight, s.cod_amount,
             s.total_charge, s.invoice_id, s.driver_id, s.branch_id, s.bin, s.attempts, s.created_at, s.updated_at,
+            s.shipment_type, s.customs_status, s.dest_airport,
             c.name AS customer_name, u.name AS driver_name, b.code AS branch_code
        FROM shipments s JOIN customers c ON c.id = s.customer_id
        LEFT JOIN users u ON u.id = s.driver_id LEFT JOIN branches b ON b.id = s.branch_id

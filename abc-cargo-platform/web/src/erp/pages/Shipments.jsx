@@ -6,14 +6,15 @@ import { useLoad, useAction, Spinner, ErrorBox, Badge, Modal, Field, Empty } fro
 import { aed, dt, ago, STATUS, SERVICES } from '../../shared/format.js';
 import { useSession } from '../../shared/session.jsx';
 import ShipmentForm from '../../shared/ShipmentForm.jsx';
-import { ShippingLabel } from '../../shared/docs.jsx';
+import { ShippingLabel, CommercialInvoice } from '../../shared/docs.jsx';
+import { IntlPanel } from './International.jsx';
 
 export function ShipmentList() {
   const nav = useNavigate();
   const { user } = useSession();
   const [f, setF] = useState({ q: '', status: '', from: '', to: '', page: 1 });
   const [creating, setCreating] = useState(false);
-  const list = useLoad(() => api.get(`/api/shipments${qs({ ...f, limit: 50 })}`), [f.q, f.status, f.from, f.to, f.page]);
+  const list = useLoad(() => api.get(`/api/shipments${qs({ ...f, limit: 50 })}`), [f.q, f.status, f.from, f.to, f.page, f.type]);
   const pages = list.data ? Math.max(1, Math.ceil(list.data.total / 50)) : 1;
   return (
     <>
@@ -23,8 +24,9 @@ export function ShipmentList() {
       </div>
       <div className="filters">
         <Field label="Search"><input placeholder="AWB, name, phone, ref" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value, page: 1 })} /></Field>
+        <Field label="Type"><select value={f.type || ''} onChange={(e) => setF({ ...f, type: e.target.value, page: 1 })}><option value="">All</option><option value="INTERNATIONAL">International</option><option value="DOMESTIC">Domestic</option></select></Field>
         <Field label="Status"><select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value, page: 1 })}>
-          <option value="">All</option>{Object.entries(STATUS).slice(0, 10).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></Field>
+          <option value="">All</option>{Object.entries(STATUS).slice(0, 16).map(([k, s]) => <option key={k} value={k}>{s.label}</option>)}</select></Field>
         <Field label="From"><input type="date" value={f.from} onChange={(e) => setF({ ...f, from: e.target.value, page: 1 })} /></Field>
         <Field label="To"><input type="date" value={f.to} onChange={(e) => setF({ ...f, to: e.target.value, page: 1 })} /></Field>
       </div>
@@ -37,7 +39,7 @@ export function ShipmentList() {
               {list.data?.rows.map((s) => (
                 <tr key={s.id} className="clickable" onClick={() => nav(`/shipments/${s.id}`)}>
                   <td className="mono"><b>{s.awb}</b></td><td><Badge s={s.status} /></td><td>{s.customer_name}</td>
-                  <td>{s.origin_city} → {s.dest_city}{s.dest_country !== 'AE' && ` (${s.dest_country})`}</td>
+                  <td>{s.dest_country !== 'AE' ? <><b>✈️ {s.dest_country}</b> {s.dest_city}</> : <>{s.origin_city} → {s.dest_city}</>}</td>
                   <td>{s.consignee_name}<div className="tiny muted">{s.consignee_phone}</div></td>
                   <td>{SERVICES[s.service]}</td><td className="num">{s.chargeable_weight}</td>
                   <td className="num">{s.cod_amount ? aed(s.cod_amount) : '—'}</td><td className="num">{aed(s.total_charge)}</td>
@@ -92,6 +94,7 @@ export function ShipmentDetail() {
   const drivers = useLoad(() => api.get('/api/warehouse/drivers').catch(() => []), []);
   const [run, busy] = useAction();
   const [label, setLabel] = useState(false);
+  const [ci, setCi] = useState(false);
   const [drv, setDrv] = useState('');
   if (d.loading && !d.data) return <Spinner />;
   if (d.error) return <ErrorBox error={d.error} />;
@@ -109,6 +112,7 @@ export function ShipmentDetail() {
           <div className="muted small">{s.customer_name} ({s.customer_code}) · booked {dt(s.created_at)} · {SERVICES[s.service]} · {s.zone}</div></div>
         <div className="row">
           <button className="btn" onClick={() => setLabel(true)}>🖨️ Label</button>
+          {s.shipment_type === 'INTERNATIONAL' && s.product !== 'DOCUMENT' && <button className="btn" onClick={() => setCi(true)}>🧾 Commercial invoice</button>}
           {canOps && ['BOOKED', 'PICKUP_ASSIGNED'].includes(s.status) && <button className="btn danger" disabled={busy} onClick={() => status('CANCELLED')}>Cancel</button>}
           {canOps && s.status === 'DELIVERY_FAILED' && <button className="btn" disabled={busy} onClick={() => status('RETURNED')}>Return to shipper</button>}
         </div>
@@ -136,6 +140,7 @@ export function ShipmentDetail() {
               <div className="small">{e.note}</div><div className="tiny muted">{dt(e.created_at)} · {e.user_name || 'system'}{!e.public && ' · internal'}{e.lat ? ` · GPS ${e.lat.toFixed(4)},${e.lng.toFixed(4)}` : ''}</div></li>))}</ul>
         </div>
         <div className="stack">
+          {s.shipment_type === 'INTERNATIONAL' && <IntlPanel s={s} onChange={() => d.reload(true)} />}
           <div className="card"><h3>Parcel</h3>{s.pieces} pcs · {s.weight} kg actual · <b>{s.chargeable_weight} kg chargeable</b>{s.length && ` · ${s.length}×${s.width}×${s.height} cm`}
             <div className="small muted">{s.description} {s.reference && `· Ref ${s.reference}`}</div>
             <div className="small">Location: {s.branch_name ? `${s.branch_name}${s.bin ? ` · bin ${s.bin}` : ''}` : '—'} · Driver: {s.driver_name || '—'} · Attempts: {s.attempts}</div></div>
@@ -158,6 +163,7 @@ export function ShipmentDetail() {
           )}
         </div>
       </div>
+      {ci && <Modal title="Commercial invoice" wide onClose={() => setCi(false)} footer={<button className="btn primary" onClick={() => window.print()}>Print</button>}><CommercialInvoice s={s} company={meta.company} /></Modal>}
       {label && <Modal title="Shipping label" onClose={() => setLabel(false)} footer={<button className="btn primary" onClick={() => window.print()}>Print</button>}>
         <div className="print-area"><ShippingLabel s={s} company={meta.company} /></div></Modal>}
     </>

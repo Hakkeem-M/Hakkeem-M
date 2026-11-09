@@ -202,6 +202,17 @@ export function seedDemo(db) {
       }
     }
 
+    // Give Driver One a ready-made run sheet (3 routed pickups + 2 deliveries) for demos.
+    const d1 = drivers[0];
+    db.all("SELECT id FROM shipments WHERE status = 'BOOKED' AND shipment_type = 'DOMESTIC' AND origin_city = 'Dubai' ORDER BY id LIMIT 3").forEach((x, i) => {
+      setStatus(db, x.id, 'PICKUP_ASSIGNED', { driver_id: d1, route_seq: i + 1 });
+      addEvent(db, x.id, 'PICKUP_ASSIGNED', { location: 'Dubai', note: 'Courier assigned for pickup', userId: ops });
+    });
+    db.all("SELECT id FROM shipments WHERE status = 'IN_WAREHOUSE' AND shipment_type = 'DOMESTIC' ORDER BY id LIMIT 2").forEach((x, i) => {
+      setStatus(db, x.id, 'OUT_FOR_DELIVERY', { driver_id: d1, bin: null, route_seq: i + 1 });
+      addEvent(db, x.id, 'OUT_FOR_DELIVERY', { note: 'Out for delivery with courier', userId: ops });
+    });
+
     // Live GPS: drivers around their zones (fresh fixes => "online").
     const now = Date.now();
     const starts = [[25.2, 55.27], [25.08, 55.14], [25.34, 55.41]];

@@ -13,13 +13,19 @@ import WarehousePage from './pages/Warehouse.jsx';
 import { Invoices, InvoiceDetail, CashCod } from './pages/Finance.jsx';
 import { Pipeline, LeadDetail, Tickets, TicketDetail, Customer360, CrmTasks } from './pages/Crm.jsx';
 import { Customers, Users, Rates, Settings, Audit } from './pages/Admin.jsx';
+import { IntlOverview, Manifests, ManifestDetail, Countries } from './pages/International.jsx';
 
 
 const NAV = [
   { to: '/', label: 'Dashboard', ic: '📊', roles: '*' },
   { to: '/shipments', label: 'Shipments', ic: '📦', roles: '*' },
-  { to: '/dispatch', label: 'Dispatch & Routing', ic: '🗺️', roles: ['ADMIN', 'OPS'] },
-  { to: '/warehouse', label: 'Warehouse', ic: '🏭', roles: ['ADMIN', 'OPS', 'WAREHOUSE'] },
+  { section: 'International' },
+  { to: '/intl', label: 'Exports & customs', ic: '🛃', roles: '*' },
+  { to: '/intl/manifests', label: 'Air manifests (MAWB)', ic: '✈️', roles: '*' },
+  { to: '/intl/countries', label: 'Countries & duties', ic: '🌍', roles: '*' },
+  { section: 'Domestic & logistics' },
+  { to: '/dispatch', label: 'Pickup routing & GPS', ic: '🗺️', roles: ['ADMIN', 'OPS'] },
+  { to: '/warehouse', label: 'Hub / warehouse', ic: '🏭', roles: ['ADMIN', 'OPS', 'WAREHOUSE'] },
   { section: 'CRM' },
   { to: '/crm', label: 'Sales pipeline', ic: '🎯', roles: ['ADMIN', 'SALES', 'OPS', 'FINANCE'] },
   { to: '/crm/tasks', label: 'Follow-ups', ic: '✅', roles: ['ADMIN', 'SALES', 'OPS', 'FINANCE'] },
@@ -40,7 +46,7 @@ function Shell() {
   const { user, logout } = useSession();
   const meta = useLoad(() => api.get('/api/public/meta'), []);
   if (user === undefined) return <Spinner />;
-  if (!user) return <LoginForm title="ABC Cargo ERP" subtitle="Operations · Finance · CRM" demo="admin@abccargo.demo" accent="erp" />;
+  if (!user) return <LoginForm title="ABC Cargo ERP" subtitle="International air courier · Cargo · Domestic · CRM" demo="admin@abccargo.demo" accent="erp" />;
   const nav = [];
   let section = null;
   for (const n of NAV) {
@@ -56,7 +62,7 @@ function Shell() {
           <div className="brand"><img src="/icons/erp.svg" alt="" width="32" height="32" /> <div><b>ABC Cargo</b><div className="tiny">ERP · {user.role}</div></div></div>
           <nav>
             {nav.map((n) => n.section ? <div key={n.section} className="sec">{n.section}</div> : (
-              <NavLink key={n.to} to={n.to} end={n.to === '/' || n.to === '/crm'}><span aria-hidden="true">{n.ic}</span> {n.label}</NavLink>
+              <NavLink key={n.to} to={n.to} end={['/', '/crm', '/intl'].includes(n.to)}><span aria-hidden="true">{n.ic}</span> {n.label}</NavLink>
             ))}
           </nav>
           <div className="me">
@@ -69,6 +75,10 @@ function Shell() {
             <Route path="/" element={<Dashboard />} />
             <Route path="/shipments" element={<ShipmentList />} />
             <Route path="/shipments/:id" element={<ShipmentDetail />} />
+            <Route path="/intl" element={<IntlOverview />} />
+            <Route path="/intl/manifests" element={<Manifests />} />
+            <Route path="/intl/manifests/:id" element={<ManifestDetail />} />
+            <Route path="/intl/countries" element={<Countries />} />
             <Route path="/dispatch" element={<Dispatch />} />
             <Route path="/warehouse" element={<WarehousePage />} />
             <Route path="/invoices" element={<Invoices />} />

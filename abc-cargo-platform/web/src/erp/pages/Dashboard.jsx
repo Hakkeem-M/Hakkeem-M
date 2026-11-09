@@ -25,6 +25,18 @@ export default function Dashboard() {
   return (
     <>
       <div className="page-head"><h1>Operations dashboard</h1><span className="muted small">Auto-refreshes every minute</span></div>
+      <h3 style={{ margin: 0 }}>✈️ International air courier & cargo</h3>
+      <div className="grid g4">
+        <Stat label="Intl shipments MTD" value={num(k.intl_shipments_mtd)} sub={`Revenue ${aed(k.intl_revenue_mtd)}`} />
+        <Stat label="At hub — ready to manifest" value={num(k.intl_ready_to_manifest)} sub={<Link to="/intl/manifests">Open manifests</Link>} />
+        <Stat label="Manifested / in flight" value={num(k.intl_in_flight)} sub={`${k.intl_at_destination} at destination`} />
+        <Stat label="Customs holds / docs pending" value={num(k.customs_holds)} alert={k.customs_holds > 0} sub={<Link to="/intl">Customs queue</Link>} />
+      </div>
+      {data.destinations?.length > 0 && (
+        <div className="card"><h3>Top destinations (30 days)</h3>
+          <div className="row" style={{ gap: 8 }}>{data.destinations.map((d) => <div key={d.code} className="card flat" style={{ minWidth: 150 }}><b>{d.name}</b><div className="small muted">{d.shipments} shpts · {d.kg} kg</div><div>{aed(d.revenue)}</div></div>)}</div></div>
+      )}
+      <h3 style={{ margin: 0 }}>🚚 Domestic & logistics</h3>
       <div className="grid g4">
         <Stat label="Bookings today" value={num(k.bookings_today)} />
         <Stat label="Pickups pending" value={num(k.pending_pickups)} sub={<Link to="/dispatch">{k.unassigned_pickups} unassigned → route now</Link>} alert={k.unassigned_pickups > 0} />
