@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS rates (
   base_weight REAL NOT NULL,
   base_price REAL NOT NULL,
   per_kg REAL NOT NULL,
+  min_charge REAL NOT NULL DEFAULT 0,
+  divisor REAL,
   transit TEXT,
   active INTEGER NOT NULL DEFAULT 1,
   UNIQUE (service, zone)
@@ -88,6 +90,21 @@ CREATE TABLE IF NOT EXISTS shipments (
   pickup_lat REAL, pickup_lng REAL, dest_lat REAL, dest_lng REAL,
   pickup_window TEXT,
   route_id INTEGER, route_seq INTEGER,
+  shipment_type TEXT NOT NULL DEFAULT 'DOMESTIC' CHECK (shipment_type IN ('DOMESTIC','INTERNATIONAL')),
+  product TEXT NOT NULL DEFAULT 'PARCEL' CHECK (product IN ('DOCUMENT','PARCEL','CARGO')),
+  incoterm TEXT CHECK (incoterm IN ('DAP','DDP')),
+  currency TEXT NOT NULL DEFAULT 'AED',
+  customs_value REAL NOT NULL DEFAULT 0,
+  export_reason TEXT,
+  consignee_tax_id TEXT, consignee_postcode TEXT, consignee_email TEXT,
+  dangerous_goods INTEGER NOT NULL DEFAULT 0,
+  duties_estimate REAL NOT NULL DEFAULT 0,
+  customs_status TEXT NOT NULL DEFAULT 'NOT_REQUIRED' CHECK (customs_status IN ('NOT_REQUIRED','PENDING','DOCS_OK','SUBMITTED','HOLD','CLEARED')),
+  customs_ref TEXT,
+  dest_airport TEXT,
+  manifest_id INTEGER,
+  agent_id INTEGER,
+  agent_tracking TEXT,
   consignee_name TEXT NOT NULL, consignee_phone TEXT NOT NULL, consignee_address TEXT NOT NULL,
   dest_city TEXT NOT NULL, dest_country TEXT NOT NULL DEFAULT 'AE',
   pieces INTEGER NOT NULL DEFAULT 1,
@@ -117,6 +134,62 @@ CREATE INDEX IF NOT EXISTS ix_ship_status ON shipments(status);
 CREATE INDEX IF NOT EXISTS ix_ship_customer ON shipments(customer_id);
 CREATE INDEX IF NOT EXISTS ix_ship_driver ON shipments(driver_id, status);
 CREATE INDEX IF NOT EXISTS ix_ship_created ON shipments(created_at);
+
+CREATE INDEX IF NOT EXISTS ix_ship_type ON shipments(shipment_type, status);
+CREATE INDEX IF NOT EXISTS ix_ship_manifest ON shipments(manifest_id);
+
+-- ---------- International ----------
+CREATE TABLE IF NOT EXISTS countries (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  zone TEXT NOT NULL,
+  airport TEXT,
+  duty_pct REAL NOT NULL DEFAULT 5,
+  import_vat_pct REAL NOT NULL DEFAULT 0,
+  de_minimis REAL NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS airports (
+  code TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  city TEXT NOT NULL,
+  country TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS agents (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  country TEXT NOT NULL,
+  contact TEXT, email TEXT, phone TEXT,
+  tracking_url TEXT,
+  active INTEGER NOT NULL DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS shipment_items (
+  id INTEGER PRIMARY KEY,
+  shipment_id INTEGER NOT NULL REFERENCES shipments(id),
+  description TEXT NOT NULL,
+  hs_code TEXT,
+  qty INTEGER NOT NULL DEFAULT 1,
+  unit_value REAL NOT NULL DEFAULT 0,
+  weight REAL,
+  origin_country TEXT NOT NULL DEFAULT 'AE'
+);
+CREATE INDEX IF NOT EXISTS ix_items_ship ON shipment_items(shipment_id);
+CREATE TABLE IF NOT EXISTS manifests (
+  id INTEGER PRIMARY KEY,
+  number TEXT UNIQUE NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('AIR_COURIER','AIR_CARGO')),
+  origin_airport TEXT NOT NULL,
+  dest_airport TEXT NOT NULL,
+  dest_country TEXT NOT NULL,
+  airline TEXT, flight_no TEXT, flight_date TEXT,
+  mawb_no TEXT,
+  agent_id INTEGER REFERENCES agents(id),
+  status TEXT NOT NULL DEFAULT 'OPEN' CHECK (status IN ('OPEN','CLOSED','DEPARTED','ARRIVED','CLEARED','DELIVERED')),
+  departed_at TEXT, arrived_at TEXT,
+  notes TEXT,
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
 
 CREATE TABLE IF NOT EXISTS shipment_events (
   id INTEGER PRIMARY KEY,

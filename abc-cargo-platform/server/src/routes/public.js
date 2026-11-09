@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getSettings } from '../db.js';
-import { SERVICES, ZONES, UAE_CITIES, COUNTRIES, quoteAll } from '../lib/pricing.js';
+import { SERVICES, ZONES, UAE_CITIES, quoteAll } from '../lib/pricing.js';
 import { STATUS_LABEL } from '../lib/shipments.js';
 import { validate, notFound, normalizeAwb, isValidAwb, badRequest } from '../lib/util.js';
 import { quoteInput } from '../lib/schemas.js';
@@ -14,7 +14,9 @@ r.get('/meta', (req, res) => {
   const s = getSettings(req.db);
   res.json({
     company: { name: s.company_name, trn: s.company_trn, phone: s.company_phone, email: s.company_email, address: s.company_address },
-    services: SERVICES, zones: ZONES, cities: Object.keys(UAE_CITIES), countries: COUNTRIES, statuses: STATUS_LABEL,
+    services: SERVICES, zones: ZONES, cities: Object.keys(UAE_CITIES), statuses: STATUS_LABEL,
+    countries: Object.fromEntries([['AE', 'United Arab Emirates'], ...req.db.all('SELECT code, name FROM countries WHERE active = 1 ORDER BY name').map((c) => [c.code, c.name])]),
+    country_list: req.db.all('SELECT code, name, zone, airport FROM countries WHERE active = 1 ORDER BY name'),
     currency: 'AED',
   });
 });
@@ -26,8 +28,11 @@ r.get('/track/:awb', (req, res) => {
   const awb = normalizeAwb(req.params.awb);
   if (!isValidAwb(awb)) throw badRequest('Invalid AWB number');
   const s = req.db.get(
-    `SELECT id, awb, service, status, origin_city, dest_city, dest_country, pieces, chargeable_weight,
-            created_at, delivered_at, pod_name, attempts FROM shipments WHERE awb = ?`, awb,
+    `SELECT s.id, s.awb, s.service, s.status, s.origin_city, s.dest_city, s.dest_country, s.pieces, s.chargeable_weight,
+            s.created_at, s.delivered_at, s.pod_name, s.attempts, s.shipment_type, s.product, s.customs_status, s.agent_tracking,
+            co.name AS dest_country_name, m.flight_no, m.flight_date, m.dest_airport, a.name AS agent_name, a.tracking_url
+       FROM shipments s LEFT JOIN countries co ON co.code = s.dest_country LEFT JOIN manifests m ON m.id = s.manifest_id
+       LEFT JOIN agents a ON a.id = s.agent_id WHERE s.awb = ?`, awb,
   );
   if (!s) throw notFound('Shipment');
   const events = req.db.all(

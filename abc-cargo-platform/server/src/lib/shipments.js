@@ -1,18 +1,22 @@
 // Core shipment / billing domain operations, shared by ERP, driver, warehouse and customer routes.
 import { getSettings, audit } from '../db.js';
-import { priceShipment, zoneFor, round2 } from './pricing.js';
+import { priceShipment, zoneFor, round2, countryRow, INTL_SERVICES } from './pricing.js';
 import { cityPoint, validPoint } from './geo.js';
 import { HttpError, newAwb, newInvoiceNumber, today, addDays, badRequest } from './util.js';
 
 export const STATUSES = [
   'BOOKED', 'PICKUP_ASSIGNED', 'PICKED_UP', 'IN_WAREHOUSE', 'IN_TRANSIT',
+  // international export / import milestones
+  'MANIFESTED', 'DEPARTED', 'ARRIVED', 'CUSTOMS_HOLD', 'CUSTOMS_CLEARED', 'WITH_AGENT',
   'OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERY_FAILED', 'RETURNED', 'CANCELLED',
 ];
 export const STATUS_LABEL = {
   BOOKED: 'Booked', PICKUP_ASSIGNED: 'Pickup assigned', PICKED_UP: 'Picked up',
-  IN_WAREHOUSE: 'At warehouse', IN_TRANSIT: 'In transit', OUT_FOR_DELIVERY: 'Out for delivery',
-  DELIVERED: 'Delivered', DELIVERY_FAILED: 'Delivery attempted', RETURNED: 'Returned to shipper',
-  CANCELLED: 'Cancelled',
+  IN_WAREHOUSE: 'At hub', IN_TRANSIT: 'In transit (UAE)',
+  MANIFESTED: 'Export cleared & manifested', DEPARTED: 'Departed on flight', ARRIVED: 'Arrived at destination',
+  CUSTOMS_HOLD: 'Held at customs', CUSTOMS_CLEARED: 'Cleared customs', WITH_AGENT: 'With delivery partner',
+  OUT_FOR_DELIVERY: 'Out for delivery', DELIVERED: 'Delivered', DELIVERY_FAILED: 'Delivery attempted',
+  RETURNED: 'Returned to shipper', CANCELLED: 'Cancelled',
 };
 export const FINAL = new Set(['DELIVERED', 'RETURNED', 'CANCELLED']);
 
@@ -39,9 +43,19 @@ export function rateFor(db, service, zone) {
 
 export function computeCharges(db, data) {
   const settings = getSettings(db);
-  const zone = zoneFor(data.origin_city, data.dest_city, data.dest_country);
-  const charges = priceShipment({ ...data, zone }, rateFor(db, data.service, zone), settings);
-  return { zone, ...charges };
+  const intl = (data.dest_country || 'AE').toUpperCase() !== 'AE';
+  const country = countryRow(db, data.dest_country);
+  if (intl && !country) throw badRequest('Destination country is not served');
+  const zone = zoneFor(data.origin_city, data.dest_city, data.dest_country, country?.zone);
+  if (intl !== INTL_SERVICES.has(data.service)) throw badRequest(intl ? 'Choose an international service' : 'Choose a domestic service');
+  const charges = priceShipment({ ...data, zone }, rateFor(db, data.service, zone), settings, country);
+  return { zone, country, ...charges };
+}
+
+/** Customs docs are complete when every non-document export has itemised contents with HS codes and values. */
+export function customsDocsOk(product, items) {
+  if (product === 'DOCUMENT') return true;
+  return items.length > 0 && items.every((i) => i.description && /^\d{6,10}$/.test(String(i.hs_code || '').replace(/\./g, '')) && i.qty > 0 && i.unit_value >= 0);
 }
 
 /**
@@ -55,6 +69,13 @@ export function createShipment(db, req, data, { status = 'BOOKED', paymentMode, 
     const mode = paymentMode || (customer.type === 'ACCOUNT' ? 'ACCOUNT' : 'CASH');
     if (mode === 'ACCOUNT' && customer.type !== 'ACCOUNT') throw badRequest('Customer has no credit account');
 
+    const intl = (data.dest_country || 'AE').toUpperCase() !== 'AE';
+    const items = intl ? (data.items || []) : [];
+    if (intl && data.product !== 'DOCUMENT' && !items.length) throw badRequest('International parcels need itemised contents (commercial invoice)');
+    const customsValue = intl
+      ? round2(items.length ? items.reduce((a, i) => a + i.qty * i.unit_value, 0) : (data.customs_value ?? data.declared_value ?? 0))
+      : 0;
+    data = { ...data, customs_value: customsValue, incoterm: intl ? (data.incoterm || 'DAP') : null, product: data.product || (intl ? 'PARCEL' : 'PARCEL') };
     const c = computeCharges(db, data);
     const awb = newAwb(db);
     // GPS pin from the app/map when provided, otherwise city centroid (flagged for dispatcher to refine).
@@ -68,8 +89,10 @@ export function createShipment(db, req, data, { status = 'BOOKED', paymentMode, 
         consignee_name, consignee_phone, consignee_address, dest_city, dest_country,
         pieces, weight, length, width, height, chargeable_weight, description, declared_value, reference,
         cod_amount, freight, fuel_surcharge, cod_fee, subtotal, vat_rate, vat, total_charge,
-        driver_id, created_by, pickup_lat, pickup_lng, dest_lat, dest_lng, pickup_window)
-       VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?, ?,?,?,?,?)`,
+        driver_id, created_by, pickup_lat, pickup_lng, dest_lat, dest_lng, pickup_window,
+        shipment_type, product, incoterm, currency, customs_value, export_reason, consignee_tax_id, consignee_postcode,
+        consignee_email, dangerous_goods, duties_estimate, customs_status, dest_airport)
+       VALUES (?,?,?,?,?,?, ?,?,?,?, ?,?,?,?,?, ?,?,?,?,?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?, ?,?,?,?,?, ?,?,?,?,?,?,?,?, ?,?,?,?,?)`,
       awb, customer.id, data.service, c.zone, status, mode,
       data.shipper_name, data.shipper_phone, data.shipper_address, data.origin_city,
       data.consignee_name, data.consignee_phone, data.consignee_address, data.dest_city, (data.dest_country || 'AE').toUpperCase(),
@@ -78,8 +101,16 @@ export function createShipment(db, req, data, { status = 'BOOKED', paymentMode, 
       data.cod_amount ?? 0, c.freight, c.fuel_surcharge, c.cod_fee, c.subtotal, c.vat_rate, c.vat, c.total_charge,
       driverId, req.user?.id ?? null, pick?.lat ?? null, pick?.lng ?? null, drop?.lat ?? null, drop?.lng ?? null,
       data.pickup_window ?? null,
+      intl ? 'INTERNATIONAL' : 'DOMESTIC', data.product, data.incoterm, data.currency || 'AED', customsValue,
+      intl ? (data.export_reason || 'SALE') : null, data.consignee_tax_id ?? null, data.consignee_postcode ?? null,
+      data.consignee_email ?? null, data.dangerous_goods ? 1 : 0, c.duties_estimate,
+      intl ? (customsDocsOk(data.product, items) ? 'DOCS_OK' : 'PENDING') : 'NOT_REQUIRED', c.country?.airport ?? null,
     );
     const id = Number(r.lastInsertRowid);
+    for (const it of items) {
+      db.run('INSERT INTO shipment_items (shipment_id, description, hs_code, qty, unit_value, weight, origin_country) VALUES (?,?,?,?,?,?,?)',
+        id, it.description, it.hs_code ?? null, it.qty, it.unit_value, it.weight ?? null, (it.origin_country || 'AE').toUpperCase());
+    }
     addEvent(db, id, 'BOOKED', { location: data.origin_city, note: 'Shipment booked', userId: req.user?.id });
     if (status !== 'BOOKED') addEvent(db, id, status, { location: location || data.origin_city, userId: req.user?.id });
     audit(db, req, 'shipment.create', 'shipment', awb, { service: data.service, total: c.total_charge });
@@ -94,10 +125,10 @@ export function repriceShipment(db, shipment, changes) {
   const c = computeCharges(db, merged);
   db.run(
     `UPDATE shipments SET pieces = ?, weight = ?, length = ?, width = ?, height = ?, chargeable_weight = ?,
-      freight = ?, fuel_surcharge = ?, cod_fee = ?, subtotal = ?, vat_rate = ?, vat = ?, total_charge = ?, updated_at = datetime('now')
+      freight = ?, fuel_surcharge = ?, cod_fee = ?, subtotal = ?, vat_rate = ?, vat = ?, total_charge = ?, duties_estimate = ?, updated_at = datetime('now')
      WHERE id = ?`,
     merged.pieces, merged.weight, merged.length ?? null, merged.width ?? null, merged.height ?? null, c.chargeable_weight,
-    c.freight, c.fuel_surcharge, c.cod_fee, c.subtotal, c.vat_rate, c.vat, c.total_charge, shipment.id,
+    c.freight, c.fuel_surcharge, c.cod_fee, c.subtotal, c.vat_rate, c.vat, c.total_charge, c.duties_estimate, shipment.id,
   );
   return db.get('SELECT * FROM shipments WHERE id = ?', shipment.id);
 }
@@ -127,7 +158,9 @@ export function createInvoice(db, req, customerId, shipments, { type, notes } = 
     const invoiceId = Number(r.lastInsertRowid);
     for (const s of shipments) {
       const desc = `${s.awb} · ${s.service} · ${s.origin_city} → ${s.dest_city} · ${s.chargeable_weight} kg` +
-        (s.cod_fee ? ` (incl. COD fee ${s.cod_fee.toFixed(2)})` : '');
+        (s.cod_fee ? ` (incl. COD fee ${s.cod_fee.toFixed(2)})` : '') +
+        (s.duties_estimate ? ` (incl. DDP duties & taxes ${s.duties_estimate.toFixed(2)})` : '') +
+        (s.shipment_type === 'INTERNATIONAL' ? ' · export, zero-rated' : '');
       db.run(
         'INSERT INTO invoice_lines (invoice_id, shipment_id, description, amount, vat_rate, vat) VALUES (?, ?, ?, ?, ?, ?)',
         invoiceId, s.id, desc, s.subtotal, s.vat_rate, s.vat,
@@ -176,6 +209,9 @@ export function shipmentDetail(db, id) {
     `SELECT e.*, u.name AS user_name FROM shipment_events e LEFT JOIN users u ON u.id = e.user_id
       WHERE shipment_id = ? ORDER BY e.id`, id,
   );
+  s.items = db.all('SELECT * FROM shipment_items WHERE shipment_id = ? ORDER BY id', id);
+  s.manifest = s.manifest_id ? db.get('SELECT id, number, mode, status, airline, flight_no, flight_date, mawb_no, dest_airport FROM manifests WHERE id = ?', s.manifest_id) : null;
+  s.agent = s.agent_id ? db.get('SELECT id, name, country, tracking_url FROM agents WHERE id = ?', s.agent_id) : null;
   s.scans = db.all(
     `SELECT w.*, b.code AS branch_code FROM warehouse_scans w JOIN branches b ON b.id = w.branch_id
       WHERE shipment_id = ? ORDER BY w.id`, id,

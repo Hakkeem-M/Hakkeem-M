@@ -5,6 +5,7 @@ import { approxPoint } from './lib/geo.js';
 import { nextSeq } from './db.js';
 
 export const DEMO_PASSWORD = 'Demo@2026';
+const UAE_SAME_DAY = true;
 
 export function seedBase(db) {
   const settings = {
@@ -13,9 +14,48 @@ export function seedBase(db) {
     company_phone: '+971 4 000 0000',
     company_email: 'info@example.com',
     company_address: 'Dubai, United Arab Emirates',
-    vat_rate_pct: '5', fuel_surcharge_pct: '8', cod_fee_pct: '2', cod_fee_min: '10', volumetric_divisor: '5000',
+    vat_rate_pct: '5', fuel_surcharge_pct: '8', intl_fuel_surcharge_pct: '18', dg_surcharge: '150',
+    cod_fee_pct: '2', cod_fee_min: '10', volumetric_divisor: '5000',
   };
   for (const [k, v] of Object.entries(settings)) db.run('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)', k, v);
+
+  // International (primary): air courier express / economy and air freight cargo by zone.
+  const intl = {
+    INTL_EXPRESS: { Z1: [0.5, 75, 30, '1-2 days'], Z2: [0.5, 85, 35, '2-3 days'], Z3: [0.5, 110, 48, '3-4 days'], Z4: [0.5, 140, 55, '2-4 days'], Z5: [0.5, 165, 65, '3-5 days'], Z6: [0.5, 185, 75, '4-6 days'] },
+    INTL_ECONOMY: { Z1: [1, 55, 18, '3-5 days'], Z2: [1, 60, 20, '4-6 days'], Z3: [1, 80, 28, '5-8 days'], Z4: [1, 95, 32, '5-7 days'], Z5: [1, 110, 38, '6-9 days'], Z6: [1, 125, 45, '7-10 days'] },
+    AIR_CARGO: { Z1: [45, 315, 6.5, 'Airport-to-door 2-3 days', 350], Z2: [45, 340, 7.5, 'Airport-to-door 3-4 days', 380], Z3: [45, 495, 11, 'Airport-to-door 4-6 days', 450],
+      Z4: [45, 585, 13, 'Airport-to-door 3-5 days', 500], Z5: [45, 675, 15, 'Airport-to-door 4-6 days', 550], Z6: [45, 765, 17, 'Airport-to-door 5-7 days', 600] },
+  };
+  for (const [svc, zones] of Object.entries(intl)) {
+    for (const [zone, [bw, bp, pk, transit, min]] of Object.entries(zones)) {
+      db.run('INSERT OR IGNORE INTO rates (service, zone, base_weight, base_price, per_kg, transit, min_charge, divisor) VALUES (?,?,?,?,?,?,?,?)',
+        svc, zone, bw, bp, pk, transit, min || 0, svc === 'AIR_CARGO' ? 6000 : 5000);
+    }
+  }
+  // code, name, zone, airport, duty %, import VAT %, de-minimis (AED customs value)
+  const countries = [
+    ['SA', 'Saudi Arabia', 'Z1', 'RUH', 5, 15, 1000], ['OM', 'Oman', 'Z1', 'MCT', 5, 5, 1000], ['QA', 'Qatar', 'Z1', 'DOH', 5, 0, 1000],
+    ['KW', 'Kuwait', 'Z1', 'KWI', 5, 0, 1000], ['BH', 'Bahrain', 'Z1', 'BAH', 5, 10, 1000],
+    ['IN', 'India', 'Z2', 'BOM', 20, 18, 0], ['PK', 'Pakistan', 'Z2', 'KHI', 20, 17, 0], ['BD', 'Bangladesh', 'Z2', 'DAC', 25, 15, 0],
+    ['LK', 'Sri Lanka', 'Z2', 'CMB', 15, 18, 0], ['NP', 'Nepal', 'Z2', 'KTM', 15, 13, 0],
+    ['PH', 'Philippines', 'Z3', 'MNL', 10, 12, 35], ['CN', 'China', 'Z3', 'PVG', 10, 13, 180], ['SG', 'Singapore', 'Z3', 'SIN', 0, 9, 1450],
+    ['MY', 'Malaysia', 'Z3', 'KUL', 10, 10, 400], ['HK', 'Hong Kong', 'Z3', 'HKG', 0, 0, 0], ['JP', 'Japan', 'Z3', 'NRT', 5, 10, 300], ['AU', 'Australia', 'Z3', 'SYD', 5, 10, 2400],
+    ['GB', 'United Kingdom', 'Z4', 'LHR', 4, 20, 625], ['DE', 'Germany', 'Z4', 'FRA', 4, 19, 600], ['FR', 'France', 'Z4', 'CDG', 4, 20, 600],
+    ['IT', 'Italy', 'Z4', 'MXP', 4, 22, 600], ['NL', 'Netherlands', 'Z4', 'AMS', 4, 21, 600], ['ES', 'Spain', 'Z4', 'MAD', 4, 21, 600], ['TR', 'Turkey', 'Z4', 'IST', 10, 20, 120],
+    ['US', 'United States', 'Z5', 'JFK', 5, 0, 2900], ['CA', 'Canada', 'Z5', 'YYZ', 5, 13, 400], ['BR', 'Brazil', 'Z5', 'GRU', 60, 17, 0],
+    ['EG', 'Egypt', 'Z6', 'CAI', 20, 14, 0], ['KE', 'Kenya', 'Z6', 'NBO', 25, 16, 0], ['NG', 'Nigeria', 'Z6', 'LOS', 20, 7.5, 0], ['ZA', 'South Africa', 'Z6', 'JNB', 10, 15, 2000],
+  ];
+  for (const c of countries) db.run('INSERT OR IGNORE INTO countries (code, name, zone, airport, duty_pct, import_vat_pct, de_minimis) VALUES (?,?,?,?,?,?,?)', ...c);
+  const airports = [['DXB', 'Dubai International', 'Dubai', 'AE'], ['DWC', 'Dubai World Central (Al Maktoum)', 'Dubai', 'AE'], ['AUH', 'Zayed International', 'Abu Dhabi', 'AE'], ['SHJ', 'Sharjah International', 'Sharjah', 'AE'],
+    ['RUH', 'King Khalid Intl', 'Riyadh', 'SA'], ['MCT', 'Muscat Intl', 'Muscat', 'OM'], ['DOH', 'Hamad Intl', 'Doha', 'QA'], ['KWI', 'Kuwait Intl', 'Kuwait City', 'KW'], ['BAH', 'Bahrain Intl', 'Manama', 'BH'],
+    ['BOM', 'Chhatrapati Shivaji Maharaj Intl', 'Mumbai', 'IN'], ['DEL', 'Indira Gandhi Intl', 'New Delhi', 'IN'], ['COK', 'Cochin Intl', 'Kochi', 'IN'], ['KHI', 'Jinnah Intl', 'Karachi', 'PK'],
+    ['DAC', 'Hazrat Shahjalal Intl', 'Dhaka', 'BD'], ['CMB', 'Bandaranaike Intl', 'Colombo', 'LK'], ['KTM', 'Tribhuvan Intl', 'Kathmandu', 'NP'], ['MNL', 'Ninoy Aquino Intl', 'Manila', 'PH'],
+    ['PVG', 'Shanghai Pudong', 'Shanghai', 'CN'], ['SIN', 'Changi', 'Singapore', 'SG'], ['KUL', 'Kuala Lumpur Intl', 'Kuala Lumpur', 'MY'], ['HKG', 'Hong Kong Intl', 'Hong Kong', 'HK'],
+    ['NRT', 'Narita', 'Tokyo', 'JP'], ['SYD', 'Sydney Kingsford Smith', 'Sydney', 'AU'], ['LHR', 'Heathrow', 'London', 'GB'], ['FRA', 'Frankfurt', 'Frankfurt', 'DE'], ['CDG', 'Charles de Gaulle', 'Paris', 'FR'],
+    ['MXP', 'Milan Malpensa', 'Milan', 'IT'], ['AMS', 'Schiphol', 'Amsterdam', 'NL'], ['MAD', 'Madrid-Barajas', 'Madrid', 'ES'], ['IST', 'Istanbul Airport', 'Istanbul', 'TR'],
+    ['JFK', 'John F. Kennedy Intl', 'New York', 'US'], ['YYZ', 'Toronto Pearson', 'Toronto', 'CA'], ['GRU', 'São Paulo Guarulhos', 'São Paulo', 'BR'], ['CAI', 'Cairo Intl', 'Cairo', 'EG'],
+    ['NBO', 'Jomo Kenyatta Intl', 'Nairobi', 'KE'], ['LOS', 'Murtala Muhammed Intl', 'Lagos', 'NG'], ['JNB', 'O. R. Tambo Intl', 'Johannesburg', 'ZA']];
+  for (const a of airports) db.run('INSERT OR IGNORE INTO airports (code, name, city, country) VALUES (?,?,?,?)', ...a);
 
   const rates = [
     ['SAME_DAY', 'LOCAL', 5, 35, 3, 'Same day (book before 12:00)'],
@@ -92,21 +132,21 @@ export function seedDemo(db) {
     const opsReq = reqAs(ops);
     const cities = ['Dubai', 'Dubai', 'Dubai', 'Sharjah', 'Abu Dhabi', 'Ajman', 'Al Ain', 'Ras Al Khaimah'];
     const firstNames = ['Aisha', 'Omar', 'Fatima', 'Ravi', 'Maria', 'Yousef', 'Sara', 'John', 'Noor', 'Ali'];
-    const flows = ['BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'BOOKED', 'PICKUP_ASSIGNED', 'PICKED_UP', 'IN_WAREHOUSE', 'IN_WAREHOUSE', 'IN_WAREHOUSE',
+    const flows = ['BOOKED', 'BOOKED', 'PICKUP_ASSIGNED', 'PICKED_UP', 'IN_WAREHOUSE', 'IN_WAREHOUSE', 'IN_WAREHOUSE',
       'OUT_FOR_DELIVERY', 'OUT_FOR_DELIVERY', 'DELIVERED', 'DELIVERED', 'DELIVERED', 'DELIVERED', 'DELIVERED', 'DELIVERY_FAILED'];
     const ago = (days, h = 0) => new Date(Date.now() - days * 86400000 - h * 3600000).toISOString().replace('T', ' ').slice(0, 19);
 
     const created = [];
-    for (let i = 0; i < 48; i++) {
+    for (let i = 0; i < 30; i++) {
       const customerId = pick([c1, c1, c1, c2, c3, c4, walkin]);
       const custRow = db.get('SELECT * FROM customers WHERE id = ?', customerId);
       const origin = custRow.city || 'Dubai';
       const dest = pick(cities);
-      const target = i < 6 ? 'BOOKED' : pick(flows);
+      const target = i < 4 ? 'BOOKED' : pick(flows);
       const pp = approxPoint(origin, i * 7 + 1);
       const dp = approxPoint(dest, i * 11 + 3);
       const s = createShipment(db, opsReq, {
-        customer_id: customerId, service: dest === origin && rand() < 0.3 && origin === 'Dubai' ? 'SAME_DAY' : pick(['EXPRESS', 'EXPRESS', 'STANDARD']),
+        customer_id: customerId, service: dest === origin && rand() < 0.3 && origin === 'Dubai' && UAE_SAME_DAY ? 'SAME_DAY' : pick(['EXPRESS', 'EXPRESS', 'STANDARD']),
         origin_city: origin, dest_city: dest, dest_country: 'AE', pieces: 1 + Math.floor(rand() * 3), weight: Math.round((0.5 + rand() * 12) * 10) / 10,
         cod_amount: customerId === c1 && rand() < 0.6 ? Math.round(50 + rand() * 450) : 0,
         shipper_name: custRow.name, shipper_phone: '+971 50 000 0001', shipper_address: custRow.address || `Demo Street, ${origin}`,
@@ -171,6 +211,82 @@ export function seedDemo(db) {
           d, starts[i][0] + k * 0.004, starts[i][1] - k * 0.003, 8 + k, 0.8, new Date(now - k * 60000).toISOString());
       }
     });
+
+    // ---------------- International demo (primary business) ----------------
+    const agent = (name, country) => Number(db.run('INSERT INTO agents (name, country, contact, email) VALUES (?, ?, ?, ?)',
+      name, country, 'Operations desk', `ops.${country.toLowerCase()}@partner.example`).lastInsertRowid);
+    const agUK = agent('UK Delivery Partner (demo)', 'GB');
+    const agIN = agent('India Delivery Partner (demo)', 'IN');
+    agent('KSA Delivery Partner (demo)', 'SA');
+    agent('Philippines Delivery Partner (demo)', 'PH');
+    agent('USA Delivery Partner (demo)', 'US');
+    const intlDest = [
+      ['GB', 'London', 'INTL_EXPRESS'], ['GB', 'Manchester', 'INTL_EXPRESS'], ['IN', 'Mumbai', 'INTL_EXPRESS'], ['IN', 'Kochi', 'INTL_ECONOMY'],
+      ['SA', 'Riyadh', 'INTL_EXPRESS'], ['PH', 'Manila', 'INTL_ECONOMY'], ['US', 'New York', 'INTL_EXPRESS'], ['PK', 'Karachi', 'INTL_ECONOMY'], ['DE', 'Frankfurt', 'AIR_CARGO'],
+    ];
+    const goods = [['Ladies abaya (textile)', '620442', 120], ['Perfume 100ml', '330300', 85], ['Dates gift box', '080410', 45], ['Mobile phone case', '420232', 25], ['Spare parts — bearings', '848210', 60]];
+    const intlIds = [];
+    for (let i = 0; i < 26; i++) {
+      const [cc, city, svc] = intlDest[i % intlDest.length];
+      const customerId = pick([c1, c1, c3, c3, c4, walkin]);
+      const custRow = db.get('SELECT * FROM customers WHERE id = ?', customerId);
+      const doc = i % 7 === 3;
+      const g = goods[i % goods.length];
+      const qty = 1 + (i % 4);
+      const cargo = svc === 'AIR_CARGO';
+      const pp = approxPoint(custRow.city || 'Dubai', i * 13 + 5);
+      const sh = createShipment(db, opsReq, {
+        customer_id: customerId, service: svc, origin_city: custRow.city || 'Dubai', dest_city: city, dest_country: cc,
+        product: doc ? 'DOCUMENT' : (cargo ? 'CARGO' : 'PARCEL'), incoterm: i % 3 === 0 ? 'DDP' : 'DAP', export_reason: 'SALE',
+        pieces: cargo ? 6 : 1, weight: cargo ? 180 : (doc ? 0.5 : Math.round((1 + rand() * 9) * 10) / 10),
+        length: cargo ? 120 : undefined, width: cargo ? 80 : undefined, height: cargo ? 90 : undefined,
+        shipper_name: custRow.name, shipper_phone: '+971 50 000 0001', shipper_address: custRow.address || 'Demo Street, Dubai',
+        consignee_name: `${pick(firstNames)} ${String.fromCharCode(75 + (i % 12))}. (demo)`, consignee_phone: `+44 7000 ${String(100000 + i)}`,
+        consignee_address: `${10 + i} Demo Road`, consignee_postcode: cc === 'GB' ? 'EC1A 1AA' : '400001', description: doc ? 'Documents' : g[0],
+        items: doc ? [] : [{ description: g[0], hs_code: g[1], qty: cargo ? 400 : qty, unit_value: g[2], origin_country: 'AE' }],
+        pickup_lat: pp.lat, pickup_lng: pp.lng, reference: customerId === c1 ? `EXP-${7000 + i}` : undefined,
+      }, { paymentMode: custRow.type === 'ACCOUNT' ? 'ACCOUNT' : 'CASH' });
+      const daysAgo = i < 6 ? 0 : 1 + Math.floor(rand() * 6);
+      db.run('UPDATE shipments SET created_at = ?, updated_at = ? WHERE id = ?', ago(daysAgo, 6), ago(daysAgo, 6), sh.id);
+      db.run('UPDATE shipment_events SET created_at = ? WHERE shipment_id = ?', ago(daysAgo, 6), sh.id);
+      if (i >= 6) { // picked up and received at the Dubai export hub
+        const drv = pick(drivers);
+        setStatus(db, sh.id, 'PICKED_UP', { driver_id: drv });
+        addEvent(db, sh.id, 'PICKED_UP', { location: custRow.city || 'Dubai', userId: drv });
+        if (sh.payment_mode === 'CASH') {
+          const inv = createInvoice(db, reqAs(drv), sh.customer_id, [db.get('SELECT * FROM shipments WHERE id = ?', sh.id)], { type: 'CASH' });
+          recordInvoicePayment(db, reqAs(drv), inv.id, { amount: inv.total, method: 'CARD' });
+        }
+        setStatus(db, sh.id, 'IN_WAREHOUSE', { branch_id: dxb.id, bin: `EXP-${cc}`, driver_id: null });
+        addEvent(db, sh.id, 'IN_WAREHOUSE', { location: dxb.name, note: 'Received at export hub', userId: ops });
+        db.run(`INSERT INTO warehouse_scans (shipment_id, awb, branch_id, direction, bin, result, message, user_id, scanned_at)
+                VALUES (?, ?, ?, 'IN', ?, 'OK', 'Received', ?, ?)`, sh.id, sh.awb, dxb.id, `EXP-${cc}`, ops, ago(daysAgo, 3));
+      }
+      if (i === 9) db.run("UPDATE shipments SET customs_status = 'PENDING' WHERE id = ?", sh.id); // demo: docs query
+      intlIds.push(sh.id);
+    }
+    // Manifests: one London consolidation departed & arrived, one Mumbai open for scanning.
+    const mkManifest = (dest, cc, agentId, flight, mawb, mode = 'AIR_COURIER') => Number(db.run(
+      `INSERT INTO manifests (number, mode, origin_airport, dest_airport, dest_country, airline, flight_no, flight_date, mawb_no, agent_id, created_by)
+       VALUES (?, ?, 'DXB', ?, ?, 'Demo Air', ?, date('now'), ?, ?, ?)`,
+      `MAN-DXB-${dest}-${String(nextSeq(db, 'manifest')).padStart(5, '0')}`, mode, dest, cc, flight, mawb, agentId, ops).lastInsertRowid);
+    const lhr = mkManifest('LHR', 'GB', agUK, 'DA001', '176-10000011');
+    const bom = mkManifest('BOM', 'IN', agIN, 'DA500', '176-10000022');
+    const onHub = (cc) => db.all("SELECT * FROM shipments WHERE dest_country = ? AND status = 'IN_WAREHOUSE' AND customs_status IN ('DOCS_OK','SUBMITTED')", cc);
+    for (const sh of onHub('GB')) {
+      setStatus(db, sh.id, 'MANIFESTED', { manifest_id: lhr, agent_id: agUK, bin: null, customs_status: 'SUBMITTED' });
+      addEvent(db, sh.id, 'MANIFESTED', { location: 'DXB export hub', note: 'Export processed — consolidated for LHR', userId: ops });
+      setStatus(db, sh.id, 'DEPARTED');
+      addEvent(db, sh.id, 'DEPARTED', { location: 'DXB', note: 'Departed DXB on Demo Air DA001 to LHR', userId: ops });
+      setStatus(db, sh.id, 'ARRIVED');
+      addEvent(db, sh.id, 'ARRIVED', { location: 'LHR', note: 'Arrived at LHR — awaiting import customs', userId: ops });
+    }
+    db.run("UPDATE manifests SET status = 'ARRIVED', departed_at = datetime('now','-10 hour'), arrived_at = datetime('now','-2 hour') WHERE id = ?", lhr);
+    const inStock = onHub('IN');
+    if (inStock[0]) {
+      setStatus(db, inStock[0].id, 'MANIFESTED', { manifest_id: bom, agent_id: agIN, bin: null, customs_status: 'SUBMITTED' });
+      addEvent(db, inStock[0].id, 'MANIFESTED', { location: 'DXB export hub', note: 'Export processed — consolidated for BOM', userId: ops });
+    }
 
     // CRM pipeline.
     const leads = [

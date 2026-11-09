@@ -43,14 +43,30 @@ test('pricing: zones, volumetric weight, VAT', () => {
   assert.equal(zoneFor('Dubai', 'Dubai'), 'LOCAL');
   assert.equal(zoneFor('Abu Dhabi', 'Al Ain'), 'LOCAL');
   assert.equal(zoneFor('Dubai', 'Sharjah'), 'DOMESTIC');
-  assert.equal(zoneFor('Dubai', 'Riyadh', 'SA'), 'GCC');
-  assert.equal(zoneFor('Dubai', 'London', 'GB'), 'INTL');
+  assert.equal(zoneFor('Dubai', 'Riyadh', 'SA', 'Z1'), 'Z1');
+  assert.equal(zoneFor('Dubai', 'London', 'GB', 'Z4'), 'Z4');
   assert.equal(chargeableWeight({ weight: 2, length: 50, width: 40, height: 30 }), 12);
   const s = { fuel_surcharge_pct: '10', cod_fee_pct: '2', cod_fee_min: '10', vat_rate_pct: '5' };
   const p = priceShipment({ zone: 'DOMESTIC', weight: 7, cod_amount: 100 }, { base_weight: 5, base_price: 30, per_kg: 2.5 }, s);
   assert.deepEqual([p.freight, p.fuel_surcharge, p.cod_fee, p.subtotal, p.vat, p.total_charge], [35, 3.5, 10, 48.5, 2.43, 50.93]);
-  const intl = priceShipment({ zone: 'INTL', weight: 1 }, { base_weight: 1, base_price: 100, per_kg: 40 }, s);
+  const intl = priceShipment({ zone: 'Z4', weight: 1 }, { base_weight: 1, base_price: 100, per_kg: 40 }, s);
   assert.equal(intl.vat, 0, 'exports zero-rated');
+  // DDP: duties billed to shipper (no VAT on duties); DAP: guidance only
+  const gb = { duty_pct: 4, import_vat_pct: 20, de_minimis: 625 };
+  const ddp = priceShipment({ zone: 'Z4', weight: 2, customs_value: 1000, incoterm: 'DDP', product: 'PARCEL' }, { base_weight: 0.5, base_price: 140, per_kg: 55 }, s, gb);
+  assert.equal(ddp.freight, 222.5);
+  assert.ok(ddp.duties_estimate > 0 && ddp.vat === 0);
+  const dap = priceShipment({ zone: 'Z4', weight: 2, customs_value: 1000, incoterm: 'DAP', product: 'PARCEL' }, { base_weight: 0.5, base_price: 140, per_kg: 55 }, s, gb);
+  assert.equal(dap.duties_estimate, 0);
+  assert.ok(dap.duties_guide.total > 0);
+  const docs = priceShipment({ zone: 'Z4', weight: 2, customs_value: 5000, incoterm: 'DDP', product: 'DOCUMENT' }, { base_weight: 0.5, base_price: 140, per_kg: 55 }, s, gb);
+  assert.equal(docs.duties_estimate, 0, 'documents duty free');
+  // Air cargo: 6000 divisor + minimum charge
+  const cargo = priceShipment({ zone: 'Z4', weight: 10, length: 100, width: 100, height: 60, pieces: 1 }, { base_weight: 45, base_price: 585, per_kg: 13, min_charge: 500, divisor: 6000 }, s);
+  assert.equal(cargo.chargeable_weight, 100, 'volumetric 100x100x60/6000');
+  assert.equal(cargo.freight, 1300);
+  const small = priceShipment({ zone: 'Z4', weight: 5 }, { base_weight: 45, base_price: 400, per_kg: 13, min_charge: 500, divisor: 6000 }, s);
+  assert.equal(small.freight, 500, 'minimum charge');
 });
 
 test('routing heuristics: capacity, sequencing, 2-opt never worse', () => {
@@ -211,6 +227,72 @@ test('CRM: lead lifecycle → convert → 360, tickets with SLA and private note
   const view = await as('customer').get(`/api/customer/tickets/${t.body.id}`);
   assert.equal(view.body.comments.length, 1, 'internal note hidden from customer');
   assert.equal((await as('ops').patch(`/api/crm/tickets/${t.body.id}`, { status: 'RESOLVED' })).body.status, 'RESOLVED');
+});
+
+test('international: export booking → hub IN → manifest scan → close/depart/arrive/clear → agent POD', async () => {
+  const q = await request(app).post('/api/public/quote').send({ origin_city: 'Dubai', dest_city: 'London', dest_country: 'GB', weight: 2, customs_value: 900, incoterm: 'DDP' });
+  assert.equal(q.status, 200);
+  assert.ok(q.body.quotes.some((x) => x.service === 'INTL_EXPRESS'));
+  assert.ok(q.body.quotes.every((x) => !['EXPRESS', 'SAME_DAY'].includes(x.service)), 'no domestic services abroad');
+
+  assert.equal((await as('customer').post('/api/customer/shipments', parcel({ service: 'INTL_EXPRESS', dest_country: 'GB', dest_city: 'London' }))).status, 400, 'items required');
+  assert.equal((await as('customer').post('/api/customer/shipments', parcel({ service: 'EXPRESS', dest_country: 'GB', dest_city: 'London', product: 'DOCUMENT' }))).status, 400, 'domestic service abroad rejected');
+  const b = await as('customer').post('/api/customer/shipments', parcel({
+    service: 'INTL_EXPRESS', dest_country: 'GB', dest_city: 'London', incoterm: 'DDP', consignee_postcode: 'SW1A 1AA',
+    items: [{ description: 'Perfume', hs_code: '3303.00', qty: 2, unit_value: 400 }],
+  }));
+  assert.equal(b.status, 201, JSON.stringify(b.body));
+  const s = b.body.shipment;
+  assert.equal(s.shipment_type, 'INTERNATIONAL');
+  assert.equal(s.customs_status, 'DOCS_OK');
+  assert.equal(s.customs_value, 800);
+  assert.equal(s.vat, 0);
+  assert.ok(s.duties_estimate > 0, 'DDP duties billed');
+  assert.equal(s.dest_airport, 'LHR');
+
+  const sid = db.get('SELECT id FROM shipments WHERE awb = ?', s.awb).id;
+  db.run("UPDATE shipments SET status = 'PICKED_UP' WHERE id = ?", sid);
+  const wh = await as('warehouse').post('/api/warehouse/scan', { awb: s.awb, direction: 'IN', bin: 'EXP-GB' });
+  assert.equal(wh.body.result, 'OK');
+  assert.equal((await as('warehouse').post('/api/warehouse/scan', { awb: s.awb, direction: 'OUT', purpose: 'DELIVERY', driver_id: 1 })).body.result, 'EXCEPTION', 'intl cannot go local delivery');
+
+  const m = await as('ops').post('/api/intl/manifests', { dest_airport: 'LHR', airline: 'Test Air', flight_no: 'TA101', flight_date: '2026-11-10' });
+  assert.equal(m.status, 201, JSON.stringify(m.body));
+  const wrong = await as('ops').post('/api/intl/manifests', { dest_airport: 'BOM' });
+  assert.equal((await as('warehouse').post(`/api/intl/manifests/${wrong.body.id}/add`, { awb: s.awb })).status, 409, 'destination mismatch');
+  const scan = await as('warehouse').post('/api/warehouse/scan', { awb: s.awb, direction: 'OUT', purpose: 'MANIFEST', manifest_id: m.body.id });
+  assert.equal(scan.body.result, 'OK', JSON.stringify(scan.body));
+  assert.equal(scan.body.shipment.status, 'MANIFESTED');
+
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/close`)).status, 409, 'MAWB required');
+  await as('ops').patch(`/api/intl/manifests/${m.body.id}`, { mawb_no: '176-12345675', agent_id: 1 });
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/close`)).status, 200);
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/depart`, {})).body.status, 'DEPARTED');
+  const csv = await as('ops').get(`/api/intl/manifests/${m.body.id}/prealert.csv`);
+  assert.equal(csv.status, 200);
+  assert.ok(csv.text.includes(s.awb) && csv.text.includes('176-12345675'));
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/arrive`)).body.status, 'ARRIVED');
+  const cl = await as('ops').post(`/api/intl/manifests/${m.body.id}/clear`, { handover: true });
+  assert.equal(cl.body.shipments[0].status, 'WITH_AGENT');
+  assert.equal((await as('ops').post(`/api/intl/shipments/${sid}/agent-event`, { status: 'DELIVERED' })).status, 400, 'POD required');
+  const pod = await as('ops').post(`/api/intl/shipments/${sid}/agent-event`, { status: 'DELIVERED', pod_name: 'J. Smith', agent_tracking: 'UK123' });
+  assert.equal(pod.body.status, 'DELIVERED');
+  const tr = await request(app).get(`/api/public/track/${s.awb}`);
+  assert.equal(tr.body.flight_no, 'TA101');
+  assert.ok(tr.body.events.some((e) => e.status === 'DEPARTED'));
+});
+
+test('international: incomplete commercial invoice blocks manifesting until fixed', async () => {
+  const b = await as('ops').post('/api/shipments', parcel({ customer_id: db.get("SELECT id FROM customers WHERE code='WALKIN'").id, service: 'INTL_ECONOMY', dest_country: 'IN', dest_city: 'Mumbai',
+    items: [{ description: 'Textiles', qty: 3, unit_value: 50 }] }));
+  assert.equal(b.status, 201, JSON.stringify(b.body));
+  assert.equal(b.body.customs_status, 'PENDING', 'missing HS code');
+  db.run("UPDATE shipments SET status = 'IN_WAREHOUSE', branch_id = 1 WHERE id = ?", b.body.id);
+  const m = await as('ops').post('/api/intl/manifests', { dest_airport: 'BOM' });
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/add`, { awb: b.body.awb })).status, 409);
+  const fix = await as('ops').put(`/api/intl/shipments/${b.body.id}/items`, { items: [{ description: 'Cotton shirts', hs_code: '620520', qty: 3, unit_value: 50 }] });
+  assert.equal(fix.body.customs_status, 'DOCS_OK');
+  assert.equal((await as('ops').post(`/api/intl/manifests/${m.body.id}/add`, { awb: b.body.awb })).status, 200);
 });
 
 test('admin: deactivating a user revokes their session', async () => {

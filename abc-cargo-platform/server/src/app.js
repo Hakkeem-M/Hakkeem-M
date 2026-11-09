@@ -15,6 +15,7 @@ import reportRoutes from './routes/reports.js';
 import routingRoutes from './routes/routing.js';
 import crmRoutes from './routes/crm.js';
 import customerRoutes from './routes/customer.js';
+import intlRoutes from './routes/international.js';
 
 export function createApp({ db, config }) {
   const app = express();
@@ -55,6 +56,7 @@ export function createApp({ db, config }) {
   app.use('/api/reports', requireAuth, reportRoutes);
   app.use('/api/routing', requireAuth, routingRoutes);
   app.use('/api/crm', requireAuth, crmRoutes);
+  app.use('/api/intl', requireAuth, intlRoutes);
   app.use('/api/customer', requireAuth, customerRoutes(config));
   app.use('/api', (_req, _res, next) => next(new HttpError(404, 'API route not found')));
 

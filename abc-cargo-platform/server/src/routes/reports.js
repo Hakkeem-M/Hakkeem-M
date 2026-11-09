@@ -27,6 +27,12 @@ r.get('/dashboard', (req, res) => {
     open_tickets: one("SELECT COUNT(*) AS n FROM tickets WHERE status NOT IN ('RESOLVED','CLOSED')").n,
     sla_breached: one("SELECT COUNT(*) AS n FROM tickets WHERE status NOT IN ('RESOLVED','CLOSED') AND datetime('now') > sla_due_at").n,
     pipeline_weighted: round2(one("SELECT COALESCE(SUM(est_monthly_value * probability / 100.0),0) AS t FROM leads WHERE stage NOT IN ('WON','LOST')").t),
+    intl_shipments_mtd: one("SELECT COUNT(*) AS n FROM shipments WHERE shipment_type = 'INTERNATIONAL' AND status != 'CANCELLED' AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").n,
+    intl_revenue_mtd: round2(one("SELECT COALESCE(SUM(total_charge),0) AS t FROM shipments WHERE shipment_type = 'INTERNATIONAL' AND status != 'CANCELLED' AND strftime('%Y-%m', created_at) = strftime('%Y-%m','now')").t),
+    intl_ready_to_manifest: one("SELECT COUNT(*) AS n FROM shipments WHERE shipment_type = 'INTERNATIONAL' AND status = 'IN_WAREHOUSE' AND manifest_id IS NULL").n,
+    intl_in_flight: one("SELECT COUNT(*) AS n FROM shipments WHERE status IN ('MANIFESTED','DEPARTED')").n,
+    intl_at_destination: one("SELECT COUNT(*) AS n FROM shipments WHERE status IN ('ARRIVED','CUSTOMS_CLEARED','WITH_AGENT')").n,
+    customs_holds: one("SELECT COUNT(*) AS n FROM shipments WHERE status = 'CUSTOMS_HOLD' OR (customs_status IN ('PENDING','HOLD') AND status NOT IN ('CANCELLED','DELIVERED','RETURNED'))").n,
     drivers_online: one("SELECT COUNT(DISTINCT driver_id) AS n FROM driver_locations WHERE (julianday('now') - julianday(recorded_at)) * 1440 <= 10").n,
   };
   const delivered30 = one("SELECT COUNT(*) AS n, SUM(CASE WHEN attempts = 0 THEN 1 ELSE 0 END) AS first FROM shipments WHERE status = 'DELIVERED' AND date(delivered_at) >= date('now','-30 day')");
@@ -53,11 +59,16 @@ r.get('/dashboard', (req, res) => {
     `SELECT c.id, c.name, COUNT(s.id) AS shipments, ROUND(SUM(s.total_charge),2) AS revenue FROM shipments s
        JOIN customers c ON c.id = s.customer_id WHERE s.status != 'CANCELLED' AND date(s.created_at) >= date('now','-30 day')
       GROUP BY c.id ORDER BY revenue DESC LIMIT 5`);
+  const destinations = db.all(
+    `SELECT s.dest_country AS code, co.name, COUNT(*) AS shipments, ROUND(SUM(s.chargeable_weight),1) AS kg, ROUND(SUM(s.total_charge),2) AS revenue
+       FROM shipments s LEFT JOIN countries co ON co.code = s.dest_country
+      WHERE s.shipment_type = 'INTERNATIONAL' AND s.status != 'CANCELLED' AND date(s.created_at) >= date('now','-30 day')
+      GROUP BY s.dest_country ORDER BY revenue DESC LIMIT 8`);
   const recent = db.all(
     `SELECT e.status, e.location, e.note, e.created_at, s.awb, s.id AS shipment_id, u.name AS user_name
        FROM shipment_events e JOIN shipments s ON s.id = e.shipment_id LEFT JOIN users u ON u.id = e.user_id
       ORDER BY e.id DESC LIMIT 15`);
-  res.json({ kpi, status_counts: statusCounts, days, by_service: byService, drivers, top_customers: topCustomers, recent });
+  res.json({ kpi, status_counts: statusCounts, days, by_service: byService, drivers, top_customers: topCustomers, destinations, recent });
 });
 
 r.get('/exceptions', (req, res) => {

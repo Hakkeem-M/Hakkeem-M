@@ -5,6 +5,7 @@ import { audit } from '../db.js';
 import { requireRole } from '../lib/auth.js';
 import { setStatus, addEvent, STATUS_LABEL } from '../lib/shipments.js';
 import { validate, badRequest, normalizeAwb } from '../lib/util.js';
+import { addToManifest } from './international.js';
 
 const r = Router();
 r.use(requireRole('ADMIN', 'OPS', 'WAREHOUSE'));
@@ -14,7 +15,8 @@ const scanInput = z.object({
   direction: z.enum(['IN', 'OUT']),
   branch_id: z.coerce.number().int().positive().optional(),
   bin: z.string().trim().max(20).optional().nullable(),
-  purpose: z.enum(['DELIVERY', 'TRANSFER', 'RETURN']).optional(),
+  purpose: z.enum(['MANIFEST', 'DELIVERY', 'TRANSFER', 'RETURN']).optional(),
+  manifest_id: z.coerce.number().int().positive().optional().nullable(),
   driver_id: z.coerce.number().int().positive().optional().nullable(),
   to_branch_id: z.coerce.number().int().positive().optional().nullable(),
   client_ref: z.string().trim().max(64).optional(),
@@ -23,7 +25,8 @@ const scanInput = z.object({
 
 function summary(s) {
   return s && {
-    id: s.id, awb: s.awb, status: s.status, status_label: STATUS_LABEL[s.status],
+    id: s.id, awb: s.awb, status: s.status, status_label: STATUS_LABEL[s.status], shipment_type: s.shipment_type,
+    dest_country: s.dest_country, customs_status: s.customs_status, manifest_id: s.manifest_id,
     consignee_name: s.consignee_name, dest_city: s.dest_city, pieces: s.pieces, bin: s.bin,
     cod_amount: s.cod_amount, driver_id: s.driver_id,
   };
@@ -74,6 +77,16 @@ export function processScan(db, req, input) {
     } else { // OUT
       if (s.status !== 'IN_WAREHOUSE' || s.branch_id !== branch.id) {
         result = 'EXCEPTION'; message = `Not in stock at ${branch.code} (status: ${STATUS_LABEL[s.status]})`;
+      } else if (purpose === 'MANIFEST') {
+        // International export: consolidate into an air manifest (MAWB).
+        try {
+          if (!input.manifest_id) throw new Error('Select an open air manifest');
+          const r2 = addToManifest(db, req, input.manifest_id, awb);
+          message = r2.already ? 'Already on this manifest' : `Manifested → ${s.dest_country}`;
+          if (r2.already) result = 'WARNING';
+        } catch (e) { result = 'EXCEPTION'; message = e.message; }
+      } else if (s.shipment_type === 'INTERNATIONAL' && purpose === 'DELIVERY') {
+        result = 'EXCEPTION'; message = `International (${s.dest_country}) — scan into an air manifest, not local delivery`;
       } else if (purpose === 'DELIVERY') {
         const driverId = input.driver_id || s.driver_id;
         const driver = driverId && db.get("SELECT id, name FROM users WHERE id = ? AND role = 'DRIVER' AND active = 1", driverId);
@@ -134,7 +147,7 @@ r.get('/inventory', (req, res) => {
   let w = "s.status = 'IN_WAREHOUSE'";
   if (branchId) { w += ' AND s.branch_id = ?'; args.push(branchId); }
   const rows = req.db.all(
-    `SELECT s.id, s.awb, s.bin, s.service, s.dest_city, s.consignee_name, s.pieces, s.chargeable_weight, s.cod_amount,
+    `SELECT s.id, s.awb, s.bin, s.service, s.dest_city, s.dest_country, s.shipment_type, s.customs_status, s.consignee_name, s.pieces, s.chargeable_weight, s.cod_amount,
             s.driver_id, u.name AS driver_name, b.code AS branch_code, s.updated_at,
             CAST((julianday('now') - julianday(s.updated_at)) * 24 AS INTEGER) AS hours_in_stock
        FROM shipments s JOIN branches b ON b.id = s.branch_id LEFT JOIN users u ON u.id = s.driver_id
@@ -158,6 +171,12 @@ r.get('/scans', (req, res) => {
       ${branchId ? 'WHERE w.branch_id = ?' : ''} ORDER BY w.id DESC LIMIT ?`,
     ...(branchId ? [branchId, limit] : [limit]),
   ));
+});
+
+r.get('/manifests', (req, res) => {
+  res.json(req.db.all(
+    `SELECT m.id, m.number, m.mode, m.dest_airport, m.dest_country, m.flight_no, m.flight_date, COUNT(s.id) AS shipments
+       FROM manifests m LEFT JOIN shipments s ON s.manifest_id = m.id WHERE m.status = 'OPEN' GROUP BY m.id ORDER BY m.id DESC`));
 });
 
 r.get('/drivers', (req, res) => {
