@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { audit, nextSeq } from '../db.js';
 import { signToken, requireAuth, publicUser } from '../lib/auth.js';
 import { HttpError, validate, zPhone, zText, conflict } from '../lib/util.js';
+import { siteRegion, domainFor } from '../lib/site.js';
 
 const r = Router();
 
@@ -44,18 +45,25 @@ export default (config) => {
     if (app && !APP_ROLES[app].includes(user.role)) {
       throw new HttpError(403, `This account (${user.role}) cannot sign in to the ${app} app`);
     }
-    // Regional login: a region-bound account can only sign in to its own region; group accounts may choose any.
-    if (region && region !== 'GROUP' && user.entity_code && user.entity_code !== region) {
-      const e = req.db.get('SELECT name FROM entities WHERE code = ?', user.entity_code);
-      throw new HttpError(403, `This account belongs to ${e?.name || user.entity_code}. Choose that region to sign in.`);
+    // Regional login. The site's domain decides the region (abccargo.uk → UK, …, abccargo.com → group);
+    // on other hosts (dev / demo) an optional region from the client is used, else the account's own region.
+    const site = siteRegion(req);
+    const want = site || region || null;
+    const regionName = (code) => req.db.get('SELECT name FROM entities WHERE code = ?', code)?.name || code;
+    const where = (code) => (domainFor(req, code) ? ` Sign in at ${domainFor(req, code)}.` : ' Choose that region to sign in.');
+    if (want === 'GROUP' && user.entity_code && site) {
+      throw new HttpError(403, `This site is for group administrators. Your account belongs to ${regionName(user.entity_code)}.${where(user.entity_code)}`);
     }
-    if (region && region !== 'GROUP' && !req.db.get('SELECT 1 AS x FROM entities WHERE code = ? AND active = 1', region)) {
+    if (want && want !== 'GROUP' && user.entity_code && user.entity_code !== want) {
+      throw new HttpError(403, `This account belongs to ${regionName(user.entity_code)}.${where(user.entity_code)}`);
+    }
+    if (want && want !== 'GROUP' && !req.db.get('SELECT 1 AS x FROM entities WHERE code = ? AND active = 1', want)) {
       throw new HttpError(400, 'Unknown region');
     }
     req.db.run("UPDATE users SET last_login_at = datetime('now') WHERE id = ?", user.id);
     req.user = user;
     audit(req.db, req, 'auth.login', 'user', user.id, { app });
-    res.json({ token: signToken(user, config), user: publicUser(user), region: user.entity_code || (region !== 'GROUP' ? region : null) || null });
+    res.json({ token: signToken(user, config), user: publicUser(user), region: user.entity_code || (want && want !== 'GROUP' ? want : null) });
   });
 
   // Public self-registration: creates a CASH (pay-per-shipment) customer account.
@@ -70,6 +78,8 @@ export default (config) => {
     password,
   })), (req, res) => {
     const b = req.body;
+    const site = siteRegion(req);
+    if (site && site !== 'GROUP') b.region = site; // regional site: customers register in that region
     if (req.db.get('SELECT id FROM users WHERE email = ?', b.email)) throw conflict('An account with this email already exists');
     const user = req.db.tx(() => {
       const code = `C${String(nextSeq(req.db, 'customer')).padStart(5, '0')}`;

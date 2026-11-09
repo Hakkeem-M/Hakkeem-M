@@ -12,6 +12,8 @@ const Ctx = createContext(null);
 export function SessionProvider({ api, app, children }) {
   const [user, setUser] = useState(undefined); // undefined = checking, null = signed out
   const [region, setRegionState] = useState(api.region || null);
+  const [site, setSite] = useState(undefined); // region served by this domain: AE | GB | SA | IN | GROUP | null
+  useEffect(() => { api.get('/api/public/site').then((x) => setSite(x.region ?? null)).catch(() => setSite(null)); }, [api]);
 
   const applyRegion = (me, wanted) => {
     const r = me?.entity_code || wanted || null;
@@ -27,11 +29,12 @@ export function SessionProvider({ api, app, children }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [api]);
 
-  const login = async (email, password, wantedRegion) => {
-    const r = await api.post('/api/auth/login', { email, password, app, region: wantedRegion || undefined });
+  // The domain decides the region (server-enforced); the account's own region applies on other hosts.
+  const login = async (email, password) => {
+    const r = await api.post('/api/auth/login', { email, password, app });
     api.setToken(r.token);
     const me = await api.get('/api/auth/me');
-    applyRegion(me, wantedRegion && wantedRegion !== 'GROUP' ? wantedRegion : null);
+    applyRegion(me, r.region);
     setUser(me);
     return me;
   };
@@ -39,7 +42,7 @@ export function SessionProvider({ api, app, children }) {
   const logout = () => { api.setToken(null); setUser(null); };
   /** Group users only: switch the working region (null = all regions). */
   const switchRegion = (r) => { if (user?.entity_code) return; applyRegion(null, r); };
-  return <Ctx.Provider value={{ api, app, user, login, logout, adopt, region, switchRegion }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ api, app, user, login, logout, adopt, region, switchRegion, site }}>{children}</Ctx.Provider>;
 }
 export const useSession = () => useContext(Ctx);
 
@@ -56,15 +59,15 @@ export function RegionPicker({ value, onChange, allowGroup }) {
 }
 
 export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup }) {
-  const { login, api } = useSession();
+  const { login, site } = useSession();
   const [v, , bind] = useForm({ email: '', password: '' });
-  const [region, setRegion] = useState(api.region || 'AE');
+  const region = site || 'GROUP';
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault();
     setBusy(true); setErr(null);
-    try { await login(v.email.trim(), v.password, region); } catch (x) { setErr(x); } finally { setBusy(false); }
+    try { await login(v.email.trim(), v.password); } catch (x) { setErr(x); } finally { setBusy(false); }
   };
   const demoFor = typeof demo === 'function' ? demo(region) : demo;
   return (
@@ -75,21 +78,20 @@ export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup })
         <div>
           <h2>Moving cargo.<br />Connecting teams.</h2>
           <span className="rule" aria-hidden="true" />
-          <p>{region === 'GROUP' ? 'UAE · UK · KSA · India' : `Your ${REGIONS[region]?.name} operations`}, in one workspace.</p>
+          <p>{site && site !== 'GROUP' ? `Your ${REGIONS[site]?.name} operations` : 'Your operations'}, in one workspace.</p>
         </div>
         <img className="skyline" src="/brand/london-skyline.svg" alt="" aria-hidden="true" />
       </section>
       <div className="panel">
         <form className="stack" onSubmit={submit}>
-          <p className="eyebrow">{region === 'GROUP' ? 'Group' : REGIONS[region]?.name} <span aria-hidden="true">·</span> {title.replace(/^ABC (Cargo )?/, '') || 'ERP'}</p>
+          <p className="eyebrow">{site && site !== 'GROUP' ? REGIONS[site]?.name : site === 'GROUP' ? 'Group' : 'ABC Cargo'} <span aria-hidden="true">·</span> {title.replace(/^ABC (Cargo )?/, '') || 'ERP'}</p>
           <h1>Welcome back</h1>
           <p className="intro">{subtitle}</p>
-          <label className="field">Region<RegionPicker value={region} onChange={setRegion} allowGroup={allowGroup} /></label>
           <ErrorBox error={err} />
           <label className="field">Email<input {...bind('email')} type="email" autoComplete="username" required autoFocus /></label>
           <label className="field">Password<input {...bind('password')} type="password" autoComplete="current-password" required /></label>
-          <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : `Sign in${region !== 'GROUP' ? ` — ${REGIONS[region]?.name}` : ' — Group'}`}</button>
-          {demoFor && <div className="alert info small">Demo login: <b>{demoFor}</b> / <b>Demo@2026</b></div>}
+          <button className="btn primary lg block" disabled={busy}>{busy ? 'Signing in…' : 'Sign in'}</button>
+          {demoFor && <div className="alert info small">Demo login: <b>{demoFor}</b> / <b>Demo@2026</b>{!site && <div className="tiny">Other regions: same name with <b>.uk</b>, <b>.ksa</b> or <b>.india</b> (e.g. ops.uk@abccargo.demo).</div>}</div>}
           {footer}
           <p className="access">Need access? Contact your IT administrator.</p>
         </form>
@@ -101,7 +103,7 @@ export function LoginForm({ title, subtitle, demo, footer, accent, allowGroup })
 
 /** Demo account names per region (fictional). */
 export const demoAccount = (prefix, region) => {
-  if (region === 'GROUP') return 'admin@abccargo.demo';
+  if (region === 'GROUP') return prefix === 'admin' ? 'admin@abccargo.demo' : `${prefix === 'driver' ? 'driver1' : prefix}@abccargo.demo`;
   const tag = { GB: 'uk', SA: 'ksa', IN: 'india' }[region];
   if (!tag) return `${prefix === 'driver' ? 'driver1' : prefix}@abccargo.demo`;
   return `${prefix}.${tag}@abccargo.demo`;

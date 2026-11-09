@@ -65,7 +65,7 @@ npm start
 ```
 Open http://localhost:4000. For hot reload: `npm run dev:api` and `npm run dev:web` (http://localhost:5173).
 
-Demo logins (fictional data, password `Demo@2026`, domain `@abccargo.demo`) — choose the region on the login screen:
+Demo logins (fictional data, password `Demo@2026`, domain `@abccargo.demo`). There is no region picker: in production the **website domain decides the region** (see below); on localhost each account signs in to its own region:
 
 | Region | Users |
 |---|---|
@@ -79,7 +79,7 @@ Demo logins (fictional data, password `Demo@2026`, domain `@abccargo.demo`) — 
 ```bash
 npm test
 ```
-24 API tests (7 for regions: login rules, data isolation, multi-box sea pricing, regional VAT/GST, quotations, receivers & KYC, sea manifests) plus: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
+27 API tests (7 for regions: login rules, data isolation, multi-box sea pricing, regional VAT/GST, quotations, receivers & KYC, sea manifests) plus: pricing/duties/air-cargo maths, routing heuristics, RBAC, PII-safe tracking, domestic lifecycle (book → route → pickup → scan → POD/COD → settle → remit), driver on-spot billing, account billing, prepaid/online pay, CRM & tickets, session revocation, and the full international flow (book with commercial invoice → hub IN → manifest scan → close/depart/arrive/clear → agent POD).
 
 ## Deploy (production)
 ```bash
@@ -89,6 +89,17 @@ Edit `.env` (strong `JWT_SECRET`, first admin), then:
 ```bash
 docker compose up -d --build
 ```
+**Regional domains** — point all four domains at the same server (one certificate each):
+
+| Domain | Region | Who can sign in |
+|---|---|---|
+| `abccargo.ae` | 🇦🇪 UAE | UAE accounts (+ group admins, working in UAE) |
+| `abccargo.uk` | 🇬🇧 UK | UK accounts (+ group admins, working in UK) |
+| `abccargogcc.com` | 🇸🇦 KSA | KSA accounts (+ group admins, working in KSA) |
+| `abccargo.com` | 🌐 Group | Group (global) admins only |
+
+Sub-domains (e.g. `erp.abccargo.uk`) match too. A user on the wrong site is told which domain to use. Change the mapping with `REGION_DOMAINS` (add India, e.g. `abccargo.in=IN`). Keep `TRUST_PROXY=1` behind a reverse proxy that forwards the original Host.
+
 Put it behind HTTPS (camera scanning, GPS and PWA install require HTTPS). Data lives in the `abc-data` volume (SQLite, WAL) — back it up daily. See `docs/ARCHITECTURE.md` for scaling to PostgreSQL, payment gateway, customs/airline and agent integrations.
 
 Rollback: `git revert` the release commit (or redeploy the previous image tag); the schema is additive (`CREATE TABLE IF NOT EXISTS`).

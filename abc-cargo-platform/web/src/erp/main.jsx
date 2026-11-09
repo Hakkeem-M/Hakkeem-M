@@ -120,7 +120,7 @@ function Shell() {
   const [mini, setMini] = useState(() => store.get('erp.mini', false));
   const toggleMini = () => setMini((m) => { store.set('erp.mini', !m); return !m; });
   if (user === undefined) return <Spinner />;
-  if (!user) return <LoginForm title="ABC Cargo ERP" subtitle="UAE · UK · KSA · India — international cargo, courier & CRM" demo={(r) => demoAccount('admin', r)} accent="erp" allowGroup />;
+  if (!user) return <LoginForm title="ABC Cargo ERP" subtitle="International cargo, courier & CRM" demo={(r) => demoAccount('admin', r)} accent="erp" allowGroup />;
   const nav = [];
   let section = null;
   for (const n of NAV) {

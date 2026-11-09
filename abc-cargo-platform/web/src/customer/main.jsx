@@ -94,8 +94,9 @@ function Track() {
 }
 
 function Quote() {
-  const { region: sessionRegion } = useSession();
-  const [region, setRegion] = useState(sessionRegion || 'AE');
+  const { region: sessionRegion, site } = useSession();
+  const fixed = site && site !== 'GROUP' ? site : null; // regional website: no region choice
+  const [region, setRegion] = useState(fixed || sessionRegion || 'AE');
   const [v, setV, bind] = useForm({ dest_country: region === 'IN' ? 'AE' : 'IN', dest_city: '', weight: 2, length: '', width: '', height: '', customs_value: 0, incoterm: 'DAP', product: 'PARCEL' });
   const meta = useLoad(() => api.get(`/api/public/meta?entity=${region}`), [region]);
   const [q, setQ] = useState(null);
@@ -114,7 +115,7 @@ function Quote() {
       <Top title="Rates — ship worldwide" />
       <form className="m-body" onSubmit={go}>
         <div className="card stack">
-          <Field label="Sending from"><RegionPicker value={region} onChange={(r) => { setRegion(r); setV((s) => ({ ...s, dest_country: r === 'IN' ? 'AE' : 'IN' })); setQ(null); }} /></Field>
+          {!fixed && <Field label="Sending from"><RegionPicker value={region} onChange={(r) => { setRegion(r); setV((s) => ({ ...s, dest_country: r === 'IN' ? 'AE' : 'IN' })); setQ(null); }} /></Field>}
           <Field label="Destination country"><select {...bind('dest_country')}>{meta.data?.country_list?.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}<option value={region}>{REGIONS[region]?.name} (domestic)</option></select></Field>
           {v.dest_country === region && <Field label="City"><select {...bind('dest_city')}>{meta.data?.cities.map((c) => <option key={c}>{c}</option>)}</select></Field>}
           <div className="grid g2">
@@ -378,21 +379,22 @@ function Account() {
 }
 
 function Register() {
-  const { adopt } = useSession();
+  const { adopt, site } = useSession();
+  const fixed = site && site !== 'GROUP' ? site : null;
   const nav = useNavigate();
   const [v, setV, bind] = useForm({ name: '', company: '', email: '', phone: '', city: '', address: '', password: '', region: 'AE' });
   const [err, setErr] = useState(null);
   const [busy, setBusy] = useState(false);
   const submit = async (e) => {
     e.preventDefault(); setBusy(true); setErr(null);
-    try { const r = await api.post('/api/auth/register', { ...v, company: v.company || undefined, address: v.address || undefined, city: v.city || undefined }); await adopt(r.token); nav('/ship'); } catch (x) { setErr(x); } finally { setBusy(false); }
+    try { const r = await api.post('/api/auth/register', { ...v, region: fixed || v.region, company: v.company || undefined, address: v.address || undefined, city: v.city || undefined }); await adopt(r.token); nav('/ship'); } catch (x) { setErr(x); } finally { setBusy(false); }
   };
   return (
     <>
       <Top title="Create account" back />
       <form className="m-body" onSubmit={submit}>
         <ErrorBox error={err} />
-        <Field label="Your country"><RegionPicker value={v.region} onChange={(r) => setV((x) => ({ ...x, region: r }))} /></Field>
+        {!fixed && <Field label="Your country"><RegionPicker value={v.region} onChange={(r) => setV((x) => ({ ...x, region: r }))} /></Field>}
         <Field label="Full name"><input {...bind('name')} required autoComplete="name" /></Field>
         <Field label="Company (optional)"><input {...bind('company')} autoComplete="organization" /></Field>
         <Field label="Email"><input {...bind('email')} type="email" required autoComplete="email" /></Field>
@@ -414,7 +416,7 @@ function LoginPage() {
   const { user } = useSession();
   const nav = useNavigate();
   if (user) { setTimeout(() => nav('/'), 0); return null; }
-  return <LoginForm title="ABC Cargo" subtitle="UAE · UK · KSA · India — ship worldwide, track, pay" demo={(r) => demoAccount('customer', r)} accent="customer"
+  return <LoginForm title="ABC Cargo" subtitle="Ship worldwide, track and pay" demo={(r) => demoAccount('customer', r)} accent="customer"
     footer={<div className="small center">New here? <Link to="/register">Create an account</Link> · <Link to="/track">Track without login</Link></div>} />;
 }
 

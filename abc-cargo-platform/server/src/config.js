@@ -1,6 +1,7 @@
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { parseRegionDomains, DEFAULT_REGION_DOMAINS } from './lib/site.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -26,6 +27,7 @@ export function loadConfig(env = process.env) {
     seedDemo: env.SEED_DEMO ? env.SEED_DEMO === '1' : !production,
     adminEmail: env.ADMIN_EMAIL,
     adminPassword: env.ADMIN_PASSWORD,
+    regionDomains: parseRegionDomains(env.REGION_DOMAINS || DEFAULT_REGION_DOMAINS),
     mapTileHosts: (env.MAP_TILE_HOSTS || 'https://tile.openstreetmap.org').split(',').map((s) => s.trim()).filter(Boolean),
   };
 }

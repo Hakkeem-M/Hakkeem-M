@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { siteRegion } from '../lib/site.js';
 import rateLimit from 'express-rate-limit';
 import { SERVICES, ZONES, CITIES, quoteAll } from '../lib/pricing.js';
 import { settingsFor, packingMap, entityRow, DEFAULT_ENTITY } from '../lib/entity.js';
@@ -11,6 +12,9 @@ const limiter = rateLimit({ windowMs: 60 * 1000, limit: 60, standardHeaders: 'dr
 r.use(limiter);
 
 // Public metadata for one region (?entity=AE|GB|SA|IN). Region list is always included for the login / region picker.
+// Which region this site (domain) serves: AE, GB, SA, IN, GROUP, or null on other hosts.
+r.get('/site', (req, res) => res.json({ region: siteRegion(req) }));
+
 r.get('/meta', (req, res) => {
   const code = String(req.query.entity || DEFAULT_ENTITY).toUpperCase();
   const e = entityRow(req.db, code) ? code : DEFAULT_ENTITY;
